@@ -104,6 +104,7 @@ function parseYouTube(url, doc = document) {
 
   return {
     showName: normalized.showName,
+    seasonNumber: normalized.seasonNumber,
     episodeNumber: null,
     episodeLabel: channel || null,
     site: 'youtube',
@@ -156,6 +157,7 @@ function parseNetflix(url, doc = document) {
   // Prefer explicit episode parsing from episode candidate when present
   const episodeParsed = parseEpisodeLabel(episodeCandidate);
   const episodeNumber = episodeParsed?.episodeNumber ?? normalized.episodeNumber;
+  const seasonNumber = episodeParsed?.seasonNumber ?? normalized.seasonNumber ?? null;
   const episodeLabel =
     episodeParsed?.episodeLabel ||
     normalized.episodeLabel ||
@@ -163,6 +165,7 @@ function parseNetflix(url, doc = document) {
 
   return {
     showName: normalized.showName,
+    seasonNumber,
     episodeNumber,
     episodeLabel,
     site: 'netflix',
@@ -200,6 +203,7 @@ function parseDisneyPlus(url, doc = document) {
 
   return {
     showName: normalized.showName,
+    seasonNumber: normalized.seasonNumber,
     episodeNumber: normalized.episodeNumber,
     episodeLabel: normalized.episodeLabel,
     site: 'disneyplus',
@@ -228,6 +232,7 @@ export function extractShowInfo(url, doc = document) {
   if (!fallback) return null;
   return {
     showName: fallback.showName,
+    seasonNumber: fallback.seasonNumber,
     episodeNumber: fallback.episodeNumber,
     episodeLabel: fallback.episodeLabel,
     site: platform,

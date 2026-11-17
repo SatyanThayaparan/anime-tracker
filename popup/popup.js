@@ -1,4 +1,5 @@
 import { formatTime, getTodayData } from '../utils/storage.js';
+import { MIN_CONFIDENT } from '../utils/anilist.js';
 
 async function initPopup() {
   try {
@@ -79,17 +80,29 @@ function displayCurrentWatching(tracking) {
     return;
   }
 
-  const episodeInfo = tracking.episodeLabel
-    ? `<div class="episode-info">${escapeHtml(tracking.episodeLabel)}</div>`
-    : tracking.episodeNumber != null
-      ? `<div class="episode-info">Episode ${escapeHtml(tracking.episodeNumber)}</div>`
-      : '';
+  const seasonNum =
+    tracking.seasonNumber != null
+      ? Number(tracking.seasonNumber)
+      : tracking.seasonProgress?.season || 1;
+  const episodeLine =
+    tracking.episodeNumber != null
+      ? `Season ${seasonNum} · Episode ${escapeHtml(tracking.episodeNumber)}`
+      : tracking.episodeLabel
+        ? escapeHtml(tracking.episodeLabel)
+        : `Season ${seasonNum}`;
 
   const site = tracking.platform || tracking.hostname || 'streaming site';
   const paused = tracking.videoProgress?.paused;
   const inactive = tracking.isActive === false;
   const anime = tracking.animeMatch;
-  const animeBadge = renderAnimeBadge(anime);
+  const posterUrl = anime?.match?.coverImage;
+  const confidence = anime?.confidence || 0;
+  const confident =
+    anime?.status === 'confirmed' ||
+    (anime?.match && confidence >= MIN_CONFIDENT);
+
+  const seasonProgressHtml = renderSeasonProgress(tracking.seasonProgress, seasonNum);
+  const animeBlock = renderAnimeBlock(anime, confident);
 
   let progressHTML = '';
   const vp = tracking.videoProgress;
@@ -113,20 +126,51 @@ function displayCurrentWatching(tracking) {
 
   container.innerHTML = `
     <div class="current-show-card">
-      <div class="show-header">
-        <div class="show-name">${escapeHtml(tracking.showName)}</div>
-        ${episodeInfo}
-        <div class="show-site">on ${escapeHtml(site)}</div>
-        ${animeBadge}
+      <div class="show-layout">
+        ${
+          posterUrl
+            ? `<img class="show-poster" src="${escapeHtml(posterUrl)}" alt="" width="72" height="102">`
+            : `<div class="show-poster placeholder" aria-hidden="true">📺</div>`
+        }
+        <div class="show-header">
+          <div class="show-name">${escapeHtml(tracking.showName)}</div>
+          <div class="episode-info">${episodeLine}</div>
+          <div class="show-site">on ${escapeHtml(site)}</div>
+          ${seasonProgressHtml}
+          ${animeBlock}
+        </div>
       </div>
       ${progressHTML}
+      <div id="wrongAnimePanel" class="wrong-anime-panel" hidden></div>
     </div>
   `;
 
   bindAnimeActions(container, tracking.showName, anime);
 }
 
-function renderAnimeBadge(anime) {
+function renderSeasonProgress(progress, seasonNum) {
+  if (!progress) {
+    return `<div class="season-progress muted">Season ${seasonNum} · tracking…</div>`;
+  }
+  const totalLabel =
+    progress.total != null
+      ? `${progress.completed}/${progress.total} eps`
+      : `${progress.completed} ep${progress.completed === 1 ? '' : 's'} done`;
+  const pct = progress.percent != null ? progress.percent : null;
+  return `
+    <div class="season-progress">
+      <div class="season-progress-top">
+        <span>Season ${progress.season}</span>
+        <span>${totalLabel}${pct != null ? ` · ${pct}%` : ''}</span>
+      </div>
+      <div class="season-progress-bar">
+        <i style="width:${pct != null ? pct : Math.min(100, progress.completed * 8)}%"></i>
+      </div>
+    </div>
+  `;
+}
+
+function renderAnimeBlock(anime, confident) {
   if (!anime) {
     return `<div class="anime-badge checking">Checking AniList…</div>`;
   }
@@ -138,38 +182,118 @@ function renderAnimeBadge(anime) {
       </div>
     `;
   }
-  if (anime.status === 'confirmed' || anime.status === 'likely') {
+
+  if (confident || anime.status === 'confirmed') {
     const title =
       anime.match?.title?.english ||
       anime.match?.title?.romaji ||
       anime.match?.title?.userPreferred ||
       'Matched';
+    const pct = Math.round((anime.confidence || 1) * 100);
+    return `
+      <div class="anime-badge ok">Anime · ${escapeHtml(title)}</div>
+      <button type="button" class="wrong-anime-link" data-anime-action="wrong">Wrong anime?</button>
+    `;
+  }
+
+  if (anime.match && (anime.status === 'likely' || (anime.confidence || 0) > 0)) {
+    const title =
+      anime.match?.title?.english ||
+      anime.match?.title?.romaji ||
+      anime.match?.title?.userPreferred ||
+      'Possible match';
     const pct = Math.round((anime.confidence || 0) * 100);
     return `
-      <div class="anime-badge ok">Anime · ${escapeHtml(title)} (${pct}%)</div>
+      <div class="anime-badge warn">Possible · ${escapeHtml(title)} (${pct}%)</div>
       <div class="anime-actions">
-        ${
-          anime.status === 'likely'
-            ? `<button type="button" class="anime-btn" data-anime-action="confirm">Confirm</button>`
-            : ''
-        }
-        <button type="button" class="anime-btn ghost" data-anime-action="reject">Not anime</button>
+        <button type="button" class="anime-btn" data-anime-action="confirm">This is anime</button>
+        <button type="button" class="wrong-anime-link" data-anime-action="wrong">Wrong anime?</button>
       </div>
     `;
   }
+
   return `
     <div class="anime-badge warn">Not found as anime</div>
     <div class="anime-actions">
-      <button type="button" class="anime-btn" data-anime-action="confirm">Mark as anime</button>
+      <button type="button" class="anime-btn" data-anime-action="confirm">This is anime</button>
       <button type="button" class="anime-btn ghost" data-anime-action="retry">Search again</button>
     </div>
   `;
+}
+
+function showWrongAnimePanel(container, showName, anime) {
+  const panel = container.querySelector('#wrongAnimePanel');
+  if (!panel) return;
+  const candidates = anime?.candidates || [];
+  panel.hidden = false;
+  panel.innerHTML = `
+    <p class="wrong-anime-title">Pick the right title</p>
+    <div class="wrong-anime-list">
+      ${
+        candidates.length
+          ? candidates
+              .map((c) => {
+                const label = c.title?.english || c.title?.romaji || c.title?.userPreferred || 'Candidate';
+                return `
+                <button type="button" class="wrong-anime-option" data-anime-pick="${c.id}">
+                  ${
+                    c.coverImage
+                      ? `<img src="${escapeHtml(c.coverImage)}" alt="" width="28" height="40">`
+                      : ''
+                  }
+                  <span>
+                    <strong>${escapeHtml(label)}</strong>
+                    <small>${Math.round((c.confidence || 0) * 100)}% · ${escapeHtml(
+                      (c.format || 'ANIME').replaceAll('_', ' ')
+                    )}</small>
+                  </span>
+                </button>`;
+              })
+              .join('')
+          : `<p class="empty-state">No alternate matches. Mark as not anime or search again.</p>`
+      }
+    </div>
+    <div class="anime-actions">
+      <button type="button" class="anime-btn ghost" data-anime-action="reject">Not anime</button>
+      <button type="button" class="anime-btn ghost" data-anime-action="retry">Search again</button>
+      <button type="button" class="anime-btn ghost" data-anime-action="close-wrong">Cancel</button>
+    </div>
+  `;
+
+  panel.querySelectorAll('[data-anime-pick]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pick = candidates.find((c) => String(c.id) === String(btn.dataset.animePick));
+      chrome.runtime.sendMessage(
+        {
+          type: 'SET_ANIME_OVERRIDE',
+          showName,
+          status: 'confirmed',
+          match: pick || null,
+        },
+        () => {
+          void chrome.runtime.lastError;
+          void loadCurrentWatching();
+        }
+      );
+    });
+  });
+
+  bindAnimeActions(panel, showName, anime);
 }
 
 function bindAnimeActions(container, showName, anime) {
   container.querySelectorAll('[data-anime-action]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.animeAction;
+      if (action === 'wrong') {
+        showWrongAnimePanel(container.closest('.current-show-card') || container, showName, anime);
+        return;
+      }
+      if (action === 'close-wrong') {
+        const panel = document.getElementById('wrongAnimePanel');
+        if (panel) panel.hidden = true;
+        return;
+      }
       if (action === 'retry') {
         chrome.runtime.sendMessage(
           { type: 'VERIFY_ANIME', showName, force: true },

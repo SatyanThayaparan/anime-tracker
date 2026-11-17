@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anime Tracker",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Track watching time on Netflix, YouTube, and Disney+ with local daily, weekly, and monthly stats.",
   "permissions": [
     "tabs",
@@ -15,7 +15,8 @@
     "*://*.youtube.com/*",
     "*://youtu.be/*",
     "*://*.disneyplus.com/*",
-    "https://graphql.anilist.co/*"
+    "https://graphql.anilist.co/*",
+    "https://s4.anilist.co/*"
   ],
   "background": {
     "service_worker": "background.js",

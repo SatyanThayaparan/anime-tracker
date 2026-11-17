@@ -6,8 +6,9 @@
 const ANILIST_URL = 'https://graphql.anilist.co';
 const CACHE_KEY = 'animeCatalog';
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const MIN_AUTO_CONFIRM = 0.86;
-const MIN_LIKELY = 0.62;
+/** 80%+ = show confidently without asking "is this anime?" */
+export const MIN_CONFIDENT = 0.8;
+const MIN_LIKELY = 0.45;
 
 const SEARCH_QUERY = `
   query ($search: String!) {
@@ -20,6 +21,10 @@ const SEARCH_QUERY = `
         episodes
         genres
         averageScore
+        coverImage {
+          large
+          medium
+        }
         title {
           romaji
           english
@@ -95,6 +100,8 @@ function compactMedia(media, confidence) {
     episodes: media.episodes || null,
     genres: media.genres || [],
     averageScore: media.averageScore || null,
+    coverImage:
+      media.coverImage?.large || media.coverImage?.medium || null,
     title: {
       romaji: media.title?.romaji || null,
       english: media.title?.english || null,
@@ -107,7 +114,7 @@ function compactMedia(media, confidence) {
 
 function statusFromConfidence(confidence, hasMatch) {
   if (!hasMatch) return 'unlikely';
-  if (confidence >= MIN_AUTO_CONFIRM) return 'confirmed';
+  if (confidence >= MIN_CONFIDENT) return 'confirmed';
   if (confidence >= MIN_LIKELY) return 'likely';
   return 'unlikely';
 }
@@ -194,13 +201,15 @@ export async function verifyAnimeTitle(showName, { force = false } = {}) {
   }
 
   const existing = await getCatalogEntry(showName);
-  if (
-    !force &&
+  const cacheFresh =
     existing?.checkedAt &&
     Date.now() - new Date(existing.checkedAt).getTime() < CACHE_TTL_MS &&
     existing.status &&
-    existing.status !== 'error'
-  ) {
+    existing.status !== 'error';
+  // Refresh once if an older cache entry has no poster.
+  const needsCover =
+    existing?.match && !existing.match.coverImage && existing.status !== 'rejected';
+  if (!force && cacheFresh && !needsCover) {
     return {
       ...existing,
       isAnime: existing.status === 'confirmed' || existing.status === 'likely',

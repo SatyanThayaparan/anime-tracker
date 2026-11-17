@@ -142,8 +142,141 @@ body {
   box-shadow: 0 10px 28px rgba(63, 84, 74, 0.1);
 }
 
-.show-header {
+.show-layout {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
   margin-bottom: 12px;
+}
+
+.show-poster {
+  width: 72px;
+  height: 102px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex-shrink: 0;
+  box-shadow: 0 6px 14px rgba(47, 74, 60, 0.18);
+  background: rgba(79, 107, 92, 0.1);
+}
+
+.show-poster.placeholder {
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  color: var(--muted);
+}
+
+.show-header {
+  margin-bottom: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.season-progress {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--forest);
+}
+
+.season-progress.muted {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.season-progress-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.season-progress-bar {
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(79, 107, 92, 0.12);
+  overflow: hidden;
+}
+
+.season-progress-bar > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--forest), var(--accent));
+  border-radius: 99px;
+}
+
+.wrong-anime-link {
+  margin-top: 6px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.wrong-anime-link:hover {
+  color: var(--accent);
+}
+
+.wrong-anime-panel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+}
+
+.wrong-anime-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.wrong-anime-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.wrong-anime-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--card-border);
+  background: rgba(255, 252, 247, 0.9);
+  border-radius: 10px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.wrong-anime-option img {
+  width: 28px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.wrong-anime-option strong {
+  display: block;
+  font-size: 12px;
+}
+
+.wrong-anime-option small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.wrong-anime-option:hover {
+  border-color: rgba(192, 64, 40, 0.35);
 }
 
 .show-name {

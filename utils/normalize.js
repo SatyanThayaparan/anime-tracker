@@ -26,7 +26,7 @@ export function isServiceName(name) {
 /**
  * Parse episode markers from free text.
  * @param {string} text
- * @returns {{ episodeNumber: number|null, episodeLabel: string|null, remainder: string }|null}
+ * @returns {{ seasonNumber: number|null, episodeNumber: number|null, episodeLabel: string|null, remainder: string }|null}
  */
 export function parseEpisodeLabel(text) {
   const raw = cleanText(text);
@@ -36,12 +36,32 @@ export function parseEpisodeLabel(text) {
     /^(.*?)(?:^|[\s|:_-]+)S(?:eason)?\s*(\d+)\s*[,:\-_]?\s*E(?:p(?:isode)?)?\s*(\d+)(.*)$/i
   );
   if (seasonEpisode) {
+    const seasonNumber = Number(seasonEpisode[2]);
     const episodeNumber = Number(seasonEpisode[3]);
     const remainder = cleanText(`${seasonEpisode[1]} ${seasonEpisode[4]}`);
     return {
+      seasonNumber,
       episodeNumber,
-      episodeLabel: `S${seasonEpisode[2]} E${episodeNumber}`,
+      episodeLabel: `S${seasonNumber} E${episodeNumber}`,
       remainder,
+    };
+  }
+
+  const seasonOnly = raw.match(
+    /^(.*?)(?:^|[\s|:_-]+)Season\s*(\d+)(.*)$/i
+  );
+  if (seasonOnly) {
+    const seasonNumber = Number(seasonOnly[2]);
+    const remainder = cleanText(`${seasonOnly[1]} ${seasonOnly[3]}`);
+    const nested = parseEpisodeLabel(remainder);
+    return {
+      seasonNumber,
+      episodeNumber: nested?.episodeNumber ?? null,
+      episodeLabel:
+        nested?.episodeNumber != null
+          ? `S${seasonNumber} E${nested.episodeNumber}`
+          : `Season ${seasonNumber}`,
+      remainder: nested?.remainder || remainder,
     };
   }
 
@@ -52,6 +72,7 @@ export function parseEpisodeLabel(text) {
     const episodeNumber = Number(episodeOnly[2]);
     const remainder = cleanText(`${episodeOnly[1]} ${episodeOnly[3]}`);
     return {
+      seasonNumber: null,
       episodeNumber,
       episodeLabel: `Episode ${episodeNumber}`,
       remainder,
@@ -64,6 +85,7 @@ export function parseEpisodeLabel(text) {
     const episodeNumber = Number(glued[2]);
     const tail = cleanText(glued[3] || '');
     return {
+      seasonNumber: null,
       episodeNumber,
       episodeLabel: tail ? `Episode ${episodeNumber} · ${tail}` : `Episode ${episodeNumber}`,
       remainder: cleanText(glued[1]),
@@ -77,7 +99,7 @@ export function parseEpisodeLabel(text) {
  * Turn a messy scraped title into canonical show + episode fields.
  * @param {string} rawTitle
  * @param {string} [rawEpisodeText]
- * @returns {{ showName: string, episodeNumber: number|null, episodeLabel: string|null }|null}
+ * @returns {{ showName: string, seasonNumber: number|null, episodeNumber: number|null, episodeLabel: string|null }|null}
  */
 export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
   let title = cleanText(rawTitle)
@@ -88,16 +110,15 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
 
   if (isServiceName(title)) return null;
 
+  let seasonNumber = null;
   let episodeNumber = null;
   let episodeLabel = null;
 
   const fromEpisodeField = parseEpisodeLabel(rawEpisodeText);
   if (fromEpisodeField) {
+    seasonNumber = fromEpisodeField.seasonNumber;
     episodeNumber = fromEpisodeField.episodeNumber;
     episodeLabel = fromEpisodeField.episodeLabel;
-    if (fromEpisodeField.remainder && fromEpisodeField.remainder.length > title.length) {
-      // unlikely; keep title
-    }
   }
 
   const fromTitle = parseEpisodeLabel(title);
@@ -107,12 +128,16 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
       episodeNumber = fromTitle.episodeNumber;
       episodeLabel = fromTitle.episodeLabel;
     }
+    if (seasonNumber == null) seasonNumber = fromTitle.seasonNumber;
   }
 
   // If episode text is a plain title (not E#), keep as label when we already have a number
   const episodeText = cleanText(rawEpisodeText);
   if (episodeText && episodeNumber != null && !parseEpisodeLabel(episodeText)) {
-    episodeLabel = `Episode ${episodeNumber} · ${episodeText}`;
+    episodeLabel =
+      seasonNumber != null
+        ? `S${seasonNumber} E${episodeNumber} · ${episodeText}`
+        : `Episode ${episodeNumber} · ${episodeText}`;
   } else if (episodeText && episodeNumber == null && !isServiceName(episodeText)) {
     // Subtitle without number — keep as label only
     episodeLabel = episodeText;
@@ -123,7 +148,20 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
 
   return {
     showName: title,
+    seasonNumber,
     episodeNumber,
     episodeLabel,
   };
+}
+
+/**
+ * Stable episode storage key including season when known.
+ */
+export function episodeStorageKey(seasonNumber, episodeNumber, episodeLabel) {
+  if (episodeNumber != null) {
+    const season = seasonNumber != null ? Number(seasonNumber) : 1;
+    return `S${season}E${episodeNumber}`;
+  }
+  if (episodeLabel) return String(episodeLabel);
+  return null;
 }

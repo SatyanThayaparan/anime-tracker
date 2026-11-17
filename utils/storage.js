@@ -147,6 +147,7 @@ export async function getAggregatedData(days) {
                 timestamp: 0,
                 sessions: 0,
                 rewatches: 0,
+                seasonNumber: episodeData.seasonNumber || 1,
                 label: episodeData.label || episodeNum
               };
             }
@@ -155,6 +156,9 @@ export async function getAggregatedData(days) {
             aggEpisode.time += episodeData.time || 0;
             aggEpisode.sessions += episodeData.sessions || 0;
             aggEpisode.rewatches += episodeData.rewatches || 0;
+            if (episodeData.seasonNumber != null) {
+              aggEpisode.seasonNumber = episodeData.seasonNumber;
+            }
             if (episodeData.label) aggEpisode.label = episodeData.label;
             
             // Update progress - use maximum progress seen

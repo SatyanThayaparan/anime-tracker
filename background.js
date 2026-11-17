@@ -6,11 +6,13 @@ import {
 } from './utils/anilist.js';
 import { extractHostname } from './utils/categories.js';
 import { isWatchSite } from './utils/shows.js';
+import { episodeStorageKey } from './utils/normalize.js';
 import {
   CURRENT_SCHEMA_VERSION,
   getDateKey,
   getSettings,
   getShowTags,
+  getTodayData,
   migrateWatchData,
   setShowTags,
 } from './utils/storage.js';
@@ -39,6 +41,7 @@ function emptyTracking() {
     hostname: null,
     platform: null,
     showName: null,
+    seasonNumber: null,
     episodeNumber: null,
     episodeLabel: null,
     startTime: null,
@@ -47,7 +50,47 @@ function emptyTracking() {
     isPlaying: null,
     videoProgress: null,
     animeMatch: null,
+    seasonProgress: null,
   };
+}
+
+function computeSeasonProgress(showData, seasonNumber, anilistEpisodes) {
+  const season = seasonNumber != null ? Number(seasonNumber) : 1;
+  const episodes = Object.values(showData?.episodes || {});
+  const inSeason = episodes.filter((ep) => Number(ep.seasonNumber || 1) === season);
+  const completed = inSeason.filter(
+    (ep) => ep.completed || (ep.progress || 0) >= 0.8
+  ).length;
+  const started = inSeason.length;
+  const total = anilistEpisodes > 0 ? Number(anilistEpisodes) : null;
+  const percent =
+    total != null && total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : null;
+  return {
+    season,
+    completed,
+    started,
+    total,
+    percent,
+  };
+}
+
+async function buildSeasonProgress(showName, seasonNumber, animeMatch) {
+  if (!showName) return null;
+  try {
+    const today = await getTodayData();
+    const showData = today?.shows?.[showName];
+    return computeSeasonProgress(
+      showData,
+      seasonNumber,
+      animeMatch?.match?.episodes
+    );
+  } catch {
+    return computeSeasonProgress(
+      null,
+      seasonNumber,
+      animeMatch?.match?.episodes
+    );
+  }
 }
 
 async function maybeAutoTagFromAniList(showName, match) {
@@ -238,6 +281,7 @@ async function startTrackingTab(tabId, url) {
         ? 'disneyplus'
         : 'youtube',
     showName: null,
+    seasonNumber: null,
     episodeNumber: null,
     episodeLabel: null,
     startTime: now,
@@ -245,6 +289,8 @@ async function startTrackingTab(tabId, url) {
     isActive: true,
     isPlaying: null,
     videoProgress: null,
+    animeMatch: null,
+    seasonProgress: null,
   };
 }
 
@@ -367,13 +413,16 @@ function handleMessage(message, sender, sendResponse) {
 
       if (message.showInfo?.showName) {
         const nextName = message.showInfo.showName;
+        const nextSeason = message.showInfo.seasonNumber ?? null;
         const nextEpisode =
           message.showInfo.episodeNumber ?? message.showInfo.episodeLabel ?? null;
         const prevEpisode =
           currentTracking.episodeNumber ?? currentTracking.episodeLabel ?? null;
         const changed =
           currentTracking.showName &&
-          (currentTracking.showName !== nextName || String(prevEpisode) !== String(nextEpisode));
+          (currentTracking.showName !== nextName ||
+            String(currentTracking.seasonNumber ?? '') !== String(nextSeason ?? '') ||
+            String(prevEpisode) !== String(nextEpisode));
 
         if (changed) {
           void saveCurrentSession().then(() => {
@@ -383,12 +432,27 @@ function handleMessage(message, sender, sendResponse) {
 
         const showChanged = currentTracking.showName !== nextName;
         currentTracking.showName = nextName;
+        currentTracking.seasonNumber = nextSeason;
         currentTracking.episodeNumber = message.showInfo.episodeNumber ?? null;
         currentTracking.episodeLabel = message.showInfo.episodeLabel ?? null;
         if (message.showInfo.site) currentTracking.platform = message.showInfo.site;
 
         if (showChanged || !currentTracking.animeMatch) {
-          void ensureAnimeVerification(nextName);
+          void ensureAnimeVerification(nextName).then(async (result) => {
+            currentTracking.seasonProgress = await buildSeasonProgress(
+              nextName,
+              nextSeason,
+              result
+            );
+          });
+        } else {
+          void buildSeasonProgress(
+            nextName,
+            nextSeason,
+            currentTracking.animeMatch
+          ).then((progress) => {
+            currentTracking.seasonProgress = progress;
+          });
         }
       }
 
@@ -402,6 +466,13 @@ function handleMessage(message, sender, sendResponse) {
     const respond = async () => {
       if (currentTracking.showName && !currentTracking.animeMatch) {
         currentTracking.animeMatch = await getCatalogEntry(currentTracking.showName);
+      }
+      if (currentTracking.showName) {
+        currentTracking.seasonProgress = await buildSeasonProgress(
+          currentTracking.showName,
+          currentTracking.seasonNumber,
+          currentTracking.animeMatch
+        );
       }
       return {
         tracking: currentTracking,
@@ -524,12 +595,11 @@ async function saveCurrentSession() {
     showData.platform = currentTracking.platform;
     showData.hourly[hour] = (showData.hourly[hour] || 0) + sessionDuration;
 
-    const episodeKey =
-      currentTracking.episodeNumber != null
-        ? String(currentTracking.episodeNumber)
-        : currentTracking.episodeLabel
-          ? String(currentTracking.episodeLabel)
-          : null;
+    const episodeKey = episodeStorageKey(
+      currentTracking.seasonNumber,
+      currentTracking.episodeNumber,
+      currentTracking.episodeLabel
+    );
 
     if (episodeKey) {
       if (!showData.episodes[episodeKey]) {
@@ -542,6 +612,10 @@ async function saveCurrentSession() {
           timestamp: now,
           sessions: 0,
           rewatches: 0,
+          seasonNumber:
+            currentTracking.seasonNumber != null
+              ? Number(currentTracking.seasonNumber)
+              : 1,
           label: currentTracking.episodeLabel || episodeKey,
         };
       }
@@ -550,6 +624,10 @@ async function saveCurrentSession() {
       const wasCompleted = Boolean(episodeData.completed);
       if (playing) episodeData.time += sessionDuration;
       episodeData.timestamp = now;
+      episodeData.seasonNumber =
+        currentTracking.seasonNumber != null
+          ? Number(currentTracking.seasonNumber)
+          : episodeData.seasonNumber || 1;
       if (currentTracking.episodeLabel) episodeData.label = currentTracking.episodeLabel;
 
       const vp = currentTracking.videoProgress;
