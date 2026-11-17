@@ -1,11 +1,15 @@
 import { formatTime, getTodayData } from '../utils/storage.js';
-import { MIN_CONFIDENT } from '../utils/anilist.js';
+
+/** Keep in sync with utils/anilist.js MIN_CONFIDENT — avoid importing anilist in popup. */
+const MIN_CONFIDENT = 0.8;
 
 async function initPopup() {
   try {
     setupEventListeners();
     await refresh();
-    setInterval(refresh, 2000);
+    setInterval(() => {
+      void refresh();
+    }, 2000);
   } catch (error) {
     console.error('Error initializing popup:', error);
     showError();
@@ -18,18 +22,49 @@ async function refresh() {
 
 function loadCurrentWatching() {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error(chrome.runtime.lastError);
+    let settled = false;
+    const finish = (fn) => {
+      if (settled) return;
+      settled = true;
+      try {
+        fn();
+      } catch (error) {
+        console.error(error);
         showError();
-        resolve();
-        return;
       }
-
-      displayCurrentWatching(response?.tracking);
-      displayDebug(response?.debug, response?.tracking);
       resolve();
-    });
+    };
+
+    const timer = setTimeout(() => {
+      finish(() => {
+        document.getElementById('currentWatching').innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">⏳</div>
+            <div class="empty-state-title">Extension waking up</div>
+            <div class="empty-state-subtitle">Open a Netflix/YouTube/Disney+ tab, then reopen this popup</div>
+          </div>
+        `;
+      });
+    }, 2500);
+
+    try {
+      chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' }, (response) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError) {
+          console.error(chrome.runtime.lastError);
+          finish(() => showError());
+          return;
+        }
+        finish(() => {
+          displayCurrentWatching(response?.tracking);
+          displayDebug(response?.debug, response?.tracking);
+        });
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      console.error(error);
+      finish(() => showError());
+    }
   });
 }
 

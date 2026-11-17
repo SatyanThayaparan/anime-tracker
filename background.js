@@ -465,15 +465,19 @@ function handleMessage(message, sender, sendResponse) {
 
   if (message?.type === 'GET_TRACKING_STATE') {
     const respond = async () => {
-      if (currentTracking.showName && !currentTracking.animeMatch) {
-        currentTracking.animeMatch = await getCatalogEntry(currentTracking.showName);
-      }
-      if (currentTracking.showName) {
-        currentTracking.seasonProgress = await buildSeasonProgress(
-          currentTracking.showName,
-          currentTracking.seasonNumber,
-          currentTracking.animeMatch
-        );
+      try {
+        if (currentTracking.showName && !currentTracking.animeMatch) {
+          currentTracking.animeMatch = await getCatalogEntry(currentTracking.showName);
+        }
+        if (currentTracking.showName) {
+          currentTracking.seasonProgress = await buildSeasonProgress(
+            currentTracking.showName,
+            currentTracking.seasonNumber,
+            currentTracking.animeMatch
+          );
+        }
+      } catch (error) {
+        console.error('[Anime Tracker] GET_TRACKING_STATE enrich failed', error);
       }
       return {
         tracking: currentTracking,
@@ -484,7 +488,15 @@ function handleMessage(message, sender, sendResponse) {
         },
       };
     };
-    respond().then(sendResponse);
+    respond()
+      .then((payload) => sendResponse(payload))
+      .catch((error) => {
+        console.error('[Anime Tracker] GET_TRACKING_STATE failed', error);
+        sendResponse({
+          tracking: currentTracking,
+          debug: { lastHeartbeatAt, error: String(error) },
+        });
+      });
     return true;
   }
 
@@ -686,22 +698,29 @@ async function saveCurrentSession() {
   }
 }
 
+function schedulePosterBackfill() {
+  // Defer so popup/message handlers are ready immediately after reload.
+  setTimeout(() => {
+    void backfillMissingPosters({ limit: 8 });
+  }, 5000);
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   void initializeStorage()
     .then(startTracking)
     .then(injectIntoOpenWatchTabs)
-    .then(() => backfillMissingPosters({ limit: 8 }));
+    .then(schedulePosterBackfill);
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void startTracking()
     .then(injectIntoOpenWatchTabs)
-    .then(() => backfillMissingPosters({ limit: 8 }));
+    .then(schedulePosterBackfill);
 });
 
 void initializeStorage()
   .then(startTracking)
   .then(injectIntoOpenWatchTabs)
-  .then(() => backfillMissingPosters({ limit: 8 }));
+  .then(schedulePosterBackfill);
 
 export { currentTracking, CONFIG };
