@@ -22,12 +22,14 @@
     <p id="debugStrip" class="debug-strip" aria-live="polite">site — · idle · hb none</p>
 
     <footer class="footer">
-      <button class="dashboard-btn" id="openDashboard">
+      <button class="dashboard-btn" id="openDashboard" type="button">
         View Full Dashboard
       </button>
     </footer>
   </div>
 
+  <!-- Non-module boot: always wires dashboard even if the ES module fails -->
+  <script src="popup-boot.js"></script>
   <script src="popup.js" type="module"></script>
 </body>
 </html>

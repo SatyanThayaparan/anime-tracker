@@ -1,10 +1,20 @@
-import { formatTime, getTodayData } from '../utils/storage.js';
-
-/** Keep in sync with utils/anilist.js MIN_CONFIDENT — avoid importing anilist in popup. */
+/** Keep in sync with utils/anilist.js MIN_CONFIDENT */
 const MIN_CONFIDENT = 0.8;
+
+function formatTimeShort(ms) {
+  if (!ms || ms < 1000) return '0s';
+  const minutes = Math.floor(ms / 60000);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) {
+    const rem = minutes % 60;
+    return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`;
+  }
+  return `${Math.max(1, minutes)}m`;
+}
 
 async function initPopup() {
   try {
+    // Dashboard button is also bound in popup-boot.js
     setupEventListeners();
     await refresh();
     setInterval(() => {
@@ -73,10 +83,13 @@ async function loadTodaySummary() {
   if (!el) return;
 
   try {
-    const today = await getTodayData();
+    const date = new Date();
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const data = await chrome.storage.local.get([dateKey]);
+    const today = data[dateKey] || { shows: {}, dailyStats: {} };
     const total = today?.dailyStats?.totalTime || 0;
     const shows = Object.keys(today?.shows || {}).length;
-    el.textContent = `Today · ${formatTime(total, true)} · ${shows} title${shows === 1 ? '' : 's'}`;
+    el.textContent = `Today · ${formatTimeShort(total)} · ${shows} title${shows === 1 ? '' : 's'}`;
   } catch {
     el.textContent = 'Today · —';
   }
