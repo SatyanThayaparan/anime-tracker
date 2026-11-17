@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="128" height="128" rx="24" fill="url(#bgGrad)"/>
+  
+  <!-- Chart bars -->
+  <rect x="24" y="70" width="16" height="34" rx="4" fill="white" opacity="0.9"/>
+  <rect x="48" y="50" width="16" height="54" rx="4" fill="white" opacity="0.9"/>
+  <rect x="72" y="36" width="16" height="68" rx="4" fill="white" opacity="0.9"/>
+  <rect x="96" y="56" width="16" height="48" rx="4" fill="white" opacity="0.9"/>
+  
+  <!-- Clock/time indicator -->
+  <circle cx="100" cy="32" r="16" fill="white" opacity="0.9"/>
+  <line x1="100" y1="32" x2="100" y2="24" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+  <line x1="100" y1="32" x2="108" y2="32" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+</svg>
