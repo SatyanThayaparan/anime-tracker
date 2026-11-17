@@ -83,7 +83,13 @@
   function updateShowInfo(force = false) {
     if (stopped) return;
     const now = Date.now();
-    if (!force && now - lastShowInfoUpdate < SHOW_INFO_UPDATE_INTERVAL && currentShowInfo) {
+    const missingSeason =
+      currentShowInfo?.showName &&
+      currentShowInfo.episodeNumber != null &&
+      currentShowInfo.seasonNumber == null;
+    // Retry sooner when episode is known but season is still missing (Netflix).
+    const minInterval = missingSeason ? 2000 : SHOW_INFO_UPDATE_INTERVAL;
+    if (!force && currentShowInfo && now - lastShowInfoUpdate < minInterval) {
       return;
     }
 
@@ -95,6 +101,14 @@
 
     const info = extractShowInfo(url, document);
     if (info?.showName) {
+      // Prefer newly scraped season; keep prior season if scrape still omitted it.
+      if (
+        info.seasonNumber == null &&
+        currentShowInfo?.showName === info.showName &&
+        currentShowInfo.seasonNumber != null
+      ) {
+        info.seasonNumber = currentShowInfo.seasonNumber;
+      }
       currentShowInfo = info;
       lastShowInfoUpdate = now;
     }

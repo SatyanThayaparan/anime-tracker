@@ -56,7 +56,8 @@ function emptyTracking() {
 }
 
 function computeSeasonProgress(showData, seasonNumber, anilistEpisodes) {
-  const season = seasonNumber != null ? Number(seasonNumber) : 1;
+  // Only default to 1 when we truly have no season signal.
+  const season = seasonNumber != null && Number(seasonNumber) > 0 ? Number(seasonNumber) : 1;
   const episodes = Object.values(showData?.episodes || {});
   const inSeason = episodes.filter((ep) => Number(ep.seasonNumber || 1) === season);
   const completed = inSeason.filter(
@@ -414,7 +415,15 @@ function handleMessage(message, sender, sendResponse) {
 
       if (message.showInfo?.showName) {
         const nextName = message.showInfo.showName;
-        const nextSeason = message.showInfo.seasonNumber ?? null;
+        // Netflix often omits season from the title overlay — keep last known
+        // season for the same show instead of falling back to Season 1.
+        const scrapedSeason = message.showInfo.seasonNumber ?? null;
+        const nextSeason =
+          scrapedSeason != null
+            ? scrapedSeason
+            : currentTracking.showName === nextName
+              ? currentTracking.seasonNumber
+              : null;
         const nextEpisode =
           message.showInfo.episodeNumber ?? message.showInfo.episodeLabel ?? null;
         const prevEpisode =

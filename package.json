@@ -2,7 +2,7 @@
   "name": "anime-tracker",
   "private": true,
   "type": "module",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Chrome extension watch tracker for Netflix, YouTube, and Disney+",
   "scripts": {
     "version:bump": "node scripts/bump-version.mjs",

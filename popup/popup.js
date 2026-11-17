@@ -131,13 +131,19 @@ function displayCurrentWatching(tracking) {
   const seasonNum =
     tracking.seasonNumber != null
       ? Number(tracking.seasonNumber)
-      : tracking.seasonProgress?.season || 1;
+      : tracking.seasonProgress?.season != null
+        ? Number(tracking.seasonProgress.season)
+        : null;
   const episodeLine =
     tracking.episodeNumber != null
-      ? `Season ${seasonNum} · Episode ${escapeHtml(tracking.episodeNumber)}`
+      ? seasonNum != null
+        ? `Season ${seasonNum} · Episode ${escapeHtml(tracking.episodeNumber)}`
+        : `Episode ${escapeHtml(tracking.episodeNumber)}`
       : tracking.episodeLabel
         ? escapeHtml(tracking.episodeLabel)
-        : `Season ${seasonNum}`;
+        : seasonNum != null
+          ? `Season ${seasonNum}`
+          : 'Episode in progress';
 
   const site = tracking.platform || tracking.hostname || 'streaming site';
   const paused = tracking.videoProgress?.paused;
@@ -220,6 +226,9 @@ function displayCurrentWatching(tracking) {
 
 function renderSeasonProgress(progress, seasonNum) {
   if (!progress) {
+    if (seasonNum == null) {
+      return `<div class="season-progress muted">Season · open Netflix episode list once to detect</div>`;
+    }
     return `<div class="season-progress muted">Season ${seasonNum} · tracking…</div>`;
   }
   const totalLabel =

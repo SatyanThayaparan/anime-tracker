@@ -2,7 +2,12 @@
  * Platform detection + title/episode extraction for Netflix, YouTube, Disney+.
  */
 
-import { cleanText, normalizeWatchIdentity, parseEpisodeLabel } from './normalize.js';
+import {
+  cleanText,
+  normalizeWatchIdentity,
+  parseEpisodeLabel,
+  parseSeasonOnly,
+} from './normalize.js';
 
 export const WATCH_SITES = [
   'netflix.com',
@@ -112,6 +117,59 @@ function parseYouTube(url, doc = document) {
   };
 }
 
+/**
+ * Netflix player often only shows "E11" — season lives in the episodes panel /
+ * season selector / aria-labels. Scrape those so we don't default to Season 1.
+ * @param {Document} doc
+ * @returns {number|null}
+ */
+function extractNetflixSeason(doc = document) {
+  const selectorTexts = [
+    firstText(
+      [
+        '[data-uia="selector-label"]',
+        '[data-uia="season-selector"]',
+        '[data-uia="season-selector"] button',
+        'button[data-uia*="season"]',
+        '.episode-selector .dropdown-toggle',
+        '[class*="episode-selector"] button',
+      ],
+      doc
+    ),
+  ];
+
+  // Visible "Season N" labels anywhere in player chrome / episodes tray
+  const seasonNodes = doc.querySelectorAll(
+    '[data-uia="selector-label"], [data-uia*="season"], [aria-label*="Season"], [aria-label*="season"], button, h3, h4, label'
+  );
+  for (const node of seasonNodes) {
+    const label = cleanText(node.getAttribute?.('aria-label') || node.textContent || '');
+    if (!label || label.length > 40) continue;
+    const season = parseSeasonOnly(label);
+    if (season != null) selectorTexts.push(label);
+  }
+
+  for (const text of selectorTexts) {
+    const season = parseSeasonOnly(text);
+    if (season != null) return season;
+  }
+
+  // Selected / highlighted episode row often includes season in aria-label
+  const episodeRows = doc.querySelectorAll(
+    '[data-uia="episode-item"], [data-uia*="episode"], [class*="episode-item"], [aria-current="true"]'
+  );
+  for (const row of episodeRows) {
+    const label = cleanText(row.getAttribute?.('aria-label') || row.textContent || '');
+    if (!label) continue;
+    const parsed = parseEpisodeLabel(label);
+    if (parsed?.seasonNumber != null) return parsed.seasonNumber;
+    const season = parseSeasonOnly(label);
+    if (season != null) return season;
+  }
+
+  return null;
+}
+
 function parseNetflix(url, doc = document) {
   const titleRoot =
     doc.querySelector('[data-uia="video-title"]') ||
@@ -119,9 +177,24 @@ function parseNetflix(url, doc = document) {
     doc.querySelector('.video-title');
 
   // Netflix often nests show + episode under the same video-title node.
-  const nested = childTexts(titleRoot, ['h4', 'span', 'p', 'div']);
+  // Prefer direct children text (h4 + spans) the way the player renders it.
+  const nested = [];
+  if (titleRoot) {
+    const kids = titleRoot.querySelectorAll(':scope > h4, :scope > span, :scope > p, :scope > div');
+    kids.forEach((el) => {
+      const text = cleanText(el.textContent || '');
+      if (text) nested.push(text);
+    });
+    if (!nested.length) {
+      nested.push(...childTexts(titleRoot, ['h4', 'span', 'p', 'div']));
+    }
+  }
+
   let showCandidate = nested[0] || '';
   let episodeCandidate = nested.slice(1).join(' · ');
+
+  // Also try span[0] alone — often "S2:E11" or "2 11" on Netflix
+  const firstSpan = nested[1] || '';
 
   if (!showCandidate) {
     showCandidate =
@@ -155,9 +228,20 @@ function parseNetflix(url, doc = document) {
   if (!normalized) return null;
 
   // Prefer explicit episode parsing from episode candidate when present
-  const episodeParsed = parseEpisodeLabel(episodeCandidate);
+  const episodeParsed =
+    parseEpisodeLabel(firstSpan) ||
+    parseEpisodeLabel(episodeCandidate) ||
+    parseEpisodeLabel(nested.slice(1).join(' '));
+
   const episodeNumber = episodeParsed?.episodeNumber ?? normalized.episodeNumber;
-  const seasonNumber = episodeParsed?.seasonNumber ?? normalized.seasonNumber ?? null;
+  let seasonNumber =
+    episodeParsed?.seasonNumber ?? normalized.seasonNumber ?? null;
+
+  // Player title often omits season — pull from season selector / episode tray
+  if (seasonNumber == null) {
+    seasonNumber = extractNetflixSeason(doc);
+  }
+
   const episodeLabel =
     episodeParsed?.episodeLabel ||
     normalized.episodeLabel ||
