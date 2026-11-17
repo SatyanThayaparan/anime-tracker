@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anime Tracker",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "description": "Track watching time on Netflix, YouTube, and Disney+ with local daily, weekly, and monthly stats.",
   "permissions": [
     "tabs",

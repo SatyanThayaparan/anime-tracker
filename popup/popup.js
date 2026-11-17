@@ -216,6 +216,7 @@ function displayCurrentWatching(tracking) {
       );
     });
   }
+}
 
 function renderSeasonProgress(progress, seasonNum) {
   if (!progress) {
@@ -433,4 +434,10 @@ function showError() {
   `;
 }
 
-document.addEventListener('DOMContentLoaded', initPopup);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    void initPopup();
+  });
+} else {
+  void initPopup();
+}
