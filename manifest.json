@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Shiori",
-  "version": "1.7.0",
-  "description": "Shiori (栞) — bookmark your anime watching on Netflix, YouTube, Disney+, and Crunchyroll.",
+  "version": "1.8.0",
+  "description": "Shiori (栞) — bookmark your anime watching on Netflix, YouTube, Disney+, Crunchyroll, and Prime Video.",
   "permissions": [
     "tabs",
     "storage",
@@ -16,6 +16,14 @@
     "*://youtu.be/*",
     "*://*.disneyplus.com/*",
     "*://*.crunchyroll.com/*",
+    "*://*.primevideo.com/*",
+    "*://*.amazon.com/gp/video/*",
+    "*://*.amazon.ca/gp/video/*",
+    "*://*.amazon.co.uk/gp/video/*",
+    "*://*.amazon.de/gp/video/*",
+    "*://*.amazon.co.jp/gp/video/*",
+    "*://*.amazon.com.au/gp/video/*",
+    "*://*.amazon.in/gp/video/*",
     "https://graphql.anilist.co/*",
     "https://s4.anilist.co/*",
     "https://img.anili.st/*"
@@ -31,7 +39,15 @@
         "*://*.youtube.com/*",
         "*://youtu.be/*",
         "*://*.disneyplus.com/*",
-        "*://*.crunchyroll.com/*"
+        "*://*.crunchyroll.com/*",
+        "*://*.primevideo.com/*",
+        "*://*.amazon.com/gp/video/*",
+        "*://*.amazon.ca/gp/video/*",
+        "*://*.amazon.co.uk/gp/video/*",
+        "*://*.amazon.de/gp/video/*",
+        "*://*.amazon.co.jp/gp/video/*",
+        "*://*.amazon.com.au/gp/video/*",
+        "*://*.amazon.in/gp/video/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
@@ -50,7 +66,15 @@
         "*://*.youtube.com/*",
         "*://youtu.be/*",
         "*://*.disneyplus.com/*",
-        "*://*.crunchyroll.com/*"
+        "*://*.crunchyroll.com/*",
+        "*://*.primevideo.com/*",
+        "*://*.amazon.com/*",
+        "*://*.amazon.ca/*",
+        "*://*.amazon.co.uk/*",
+        "*://*.amazon.de/*",
+        "*://*.amazon.co.jp/*",
+        "*://*.amazon.com.au/*",
+        "*://*.amazon.in/*"
       ]
     }
   ],

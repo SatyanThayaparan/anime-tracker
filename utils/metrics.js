@@ -23,6 +23,7 @@ function platformKey(show) {
   if (raw.includes('disney')) return 'disneyplus';
   if (raw.includes('youtube') || raw.includes('youtu')) return 'youtube';
   if (raw.includes('crunchyroll')) return 'crunchyroll';
+  if (raw.includes('prime') || raw.includes('amazon')) return 'primevideo';
   if (!raw) return 'unknown';
   return raw;
 }
@@ -34,6 +35,7 @@ function platformLabel(key) {
       disneyplus: 'Disney+',
       youtube: 'YouTube',
       crunchyroll: 'Crunchyroll',
+      primevideo: 'Prime Video',
       unknown: 'Unknown',
     }[key] || key
   );

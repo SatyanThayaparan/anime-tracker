@@ -205,6 +205,14 @@ async function injectIntoOpenWatchTabs() {
         '*://youtu.be/*',
         '*://*.disneyplus.com/*',
         '*://*.crunchyroll.com/*',
+        '*://*.primevideo.com/*',
+        '*://*.amazon.com/gp/video/*',
+        '*://*.amazon.ca/gp/video/*',
+        '*://*.amazon.co.uk/gp/video/*',
+        '*://*.amazon.de/gp/video/*',
+        '*://*.amazon.co.jp/gp/video/*',
+        '*://*.amazon.com.au/gp/video/*',
+        '*://*.amazon.in/gp/video/*',
       ],
     });
 

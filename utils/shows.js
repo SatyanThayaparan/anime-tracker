@@ -1,5 +1,6 @@
 /**
- * Platform detection + title/episode extraction for Netflix, YouTube, Disney+, Crunchyroll.
+ * Platform detection + title/episode extraction for
+ * Netflix, YouTube, Disney+, Crunchyroll, Prime Video.
  */
 
 import {
@@ -16,7 +17,33 @@ export const WATCH_SITES = [
   'youtu.be',
   'disneyplus.com',
   'crunchyroll.com',
+  'primevideo.com',
 ];
+
+function isAmazonHost(host) {
+  return (
+    host === 'amazon.com' ||
+    host.endsWith('.amazon.com') ||
+    /^amazon\.[a-z.]+$/.test(host) ||
+    host.endsWith('.amazon.co.uk') ||
+    host.endsWith('.amazon.co.jp') ||
+    host.endsWith('.amazon.com.au')
+  );
+}
+
+function isPrimeVideoPath(pathname, host = '') {
+  const path = String(pathname || '').toLowerCase();
+  const h = String(host || '').toLowerCase();
+  // Dedicated Prime Video site — /detail/ASIN is the player/title page.
+  if (h.includes('primevideo')) {
+    return (
+      path.includes('/detail/') ||
+      (path.includes('/region/') && path.includes('/detail'))
+    );
+  }
+  // Amazon storefront — only explicit video paths (never shopping /detail/).
+  return path.includes('/gp/video') || path.includes('/video/detail');
+}
 
 /**
  * @param {string} url
@@ -24,8 +51,14 @@ export const WATCH_SITES = [
  */
 export function isWatchSite(url) {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-    return WATCH_SITES.some((site) => host === site || host.endsWith(`.${site}`));
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+    if (WATCH_SITES.some((site) => host === site || host.endsWith(`.${site}`))) {
+      return true;
+    }
+    // Amazon storefront only counts on video paths (not shopping).
+    if (isAmazonHost(host) && isPrimeVideoPath(parsed.pathname, host)) return true;
+    return false;
   } catch {
     return false;
   }
@@ -36,15 +69,20 @@ export const isAnimeSite = isWatchSite;
 
 /**
  * @param {string} url
- * @returns {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|null}
+ * @returns {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|'primevideo'|null}
  */
 export function getPlatform(url) {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
     if (host.includes('netflix')) return 'netflix';
     if (host.includes('youtube') || host === 'youtu.be') return 'youtube';
     if (host.includes('disneyplus')) return 'disneyplus';
     if (host.includes('crunchyroll')) return 'crunchyroll';
+    if (host.includes('primevideo')) return 'primevideo';
+    if (isAmazonHost(host) && isPrimeVideoPath(parsed.pathname, host)) {
+      return 'primevideo';
+    }
     return null;
   } catch {
     return null;
@@ -96,7 +134,7 @@ export function findVideoPlayer(doc = document) {
 /**
  * True when the URL is a playback page (not browse/search/profile).
  * @param {string} url
- * @param {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|null} [platform]
+ * @param {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|'primevideo'|null} [platform]
  */
 export function isPlayerPage(url, platform = getPlatform(url)) {
   try {
@@ -111,6 +149,14 @@ export function isPlayerPage(url, platform = getPlatform(url)) {
       );
     }
     if (platform === 'crunchyroll') return path.includes('/watch/');
+    if (platform === 'primevideo') {
+      // Prime plays on /detail/ASIN (and amazon.com/gp/video/detail/...).
+      return (
+        path.includes('/detail/') ||
+        path.includes('/gp/video/detail') ||
+        path.includes('/video/detail')
+      );
+    }
     return false;
   } catch {
     return false;
@@ -131,6 +177,8 @@ export function inferPlaybackState(doc = document) {
       'button[aria-label="Pause"]',
       'button[aria-label*="Pause" i]',
       '[aria-label="Pause"]',
+      '.atvwebplayersdk-playpause-button[aria-label*="Pause" i]',
+      'button.atvwebplayersdk-playpause-button[aria-label*="Pause" i]',
     ].join(', ')
   );
   if (pauseControl) {
@@ -152,6 +200,8 @@ export function inferPlaybackState(doc = document) {
       'button[aria-label="Play"]',
       'button[aria-label*="Play" i]',
       '[aria-label="Play"]',
+      '.atvwebplayersdk-playpause-button[aria-label*="Play" i]',
+      'button.atvwebplayersdk-playpause-button[aria-label*="Play" i]',
     ].join(', ')
   );
   if (playControl) {
@@ -480,6 +530,97 @@ function parseCrunchyroll(url, doc = document) {
   };
 }
 
+function parsePrimeVideo(url, doc = document) {
+  if (!isPlayerPage(url, 'primevideo')) return null;
+
+  // Player overlays (most reliable while playing).
+  let showCandidate = firstText(
+    [
+      '.atvwebplayersdk-title-text',
+      '[class*="atvwebplayersdk-title-text"]',
+      '[data-automation-id="title"]',
+      'h1[data-automation-id="title"]',
+    ],
+    doc
+  );
+
+  let episodeCandidate = firstText(
+    [
+      '.atvwebplayersdk-subtitle-text',
+      '[class*="atvwebplayersdk-subtitle-text"]',
+      '[data-automation-id="subtitle"]',
+    ],
+    doc
+  );
+
+  if (episodeCandidate && isUiNoiseTitle(episodeCandidate)) episodeCandidate = '';
+
+  // Detail page fallback before/while player chrome mounts.
+  if (!showCandidate) {
+    showCandidate = firstText(
+      [
+        '[data-automation-id="title"]',
+        'h1[data-automation-id="title"]',
+        'h1',
+      ],
+      doc
+    );
+  }
+
+  const docTitle = cleanText(
+    (doc.title || '')
+      .replace(/\s*[-–|:]\s*Prime Video.*$/i, '')
+      .replace(/\s*[-–|:]\s*Amazon.*$/i, '')
+  );
+
+  if (!showCandidate) {
+    showCandidate =
+      cleanText(doc.querySelector('meta[property="og:title"]')?.content) || docTitle;
+  }
+
+  if (showCandidate && isUiNoiseTitle(showCandidate)) return null;
+
+  const normalized = normalizeWatchIdentity(showCandidate, episodeCandidate || docTitle);
+  if (!normalized || isUiNoiseTitle(normalized.showName)) return null;
+
+  // Subtitle often: "Season 2, Episode 5 Title of Episode"
+  const subtitleParsed =
+    parseEpisodeLabel(episodeCandidate) ||
+    (() => {
+      const m = cleanText(episodeCandidate).match(
+        /(?:Season|Temporada|Staffel|Saison|Stagione)\s+(\d+)\D+(\d+)\s*(.*)$/i
+      );
+      if (!m) return null;
+      const seasonNumber = Number(m[1]);
+      const episodeNumber = Number(m[2]);
+      const rest = cleanText(m[3] || '');
+      return {
+        seasonNumber,
+        episodeNumber,
+        episodeLabel: rest
+          ? `S${seasonNumber} E${episodeNumber} · ${rest}`
+          : `S${seasonNumber} E${episodeNumber}`,
+        remainder: rest,
+      };
+    })();
+
+  const episodeNumber = subtitleParsed?.episodeNumber ?? normalized.episodeNumber;
+  const seasonNumber = subtitleParsed?.seasonNumber ?? normalized.seasonNumber ?? null;
+  const episodeLabel =
+    subtitleParsed?.episodeLabel ||
+    normalized.episodeLabel ||
+    (episodeCandidate && !subtitleParsed ? cleanText(episodeCandidate) : null);
+
+  return {
+    showName: normalized.showName,
+    seasonNumber,
+    episodeNumber,
+    episodeLabel,
+    site: 'primevideo',
+    url,
+  };
+}
+
 /**
  * Extract watch metadata for the current page.
  * @param {string} url
@@ -494,6 +635,7 @@ export function extractShowInfo(url, doc = document) {
     if (platform === 'netflix') return parseNetflix(url, doc);
     if (platform === 'disneyplus') return parseDisneyPlus(url, doc);
     if (platform === 'crunchyroll') return parseCrunchyroll(url, doc);
+    if (platform === 'primevideo') return parsePrimeVideo(url, doc);
   } catch (error) {
     console.debug('[Shiori] extractShowInfo failed', error);
   }

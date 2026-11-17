@@ -51,7 +51,7 @@ function loadCurrentWatching() {
           <div class="empty-state">
             <div class="empty-state-icon">⏳</div>
             <div class="empty-state-title">Extension waking up</div>
-            <div class="empty-state-subtitle">Open a Netflix/YouTube/Disney+/Crunchyroll tab, then reopen this popup</div>
+            <div class="empty-state-subtitle">Open a supported streaming tab, then reopen this popup</div>
           </div>
         `;
       });
@@ -122,7 +122,7 @@ function displayCurrentWatching(tracking) {
       <div class="empty-state">
         <div class="empty-state-icon">📺</div>
         <div class="empty-state-title">Not watching anything</div>
-        <div class="empty-state-subtitle">Open Netflix, YouTube, Disney+, or Crunchyroll to start tracking</div>
+        <div class="empty-state-subtitle">Open Netflix, YouTube, Disney+, Crunchyroll, or Prime Video to start tracking</div>
       </div>
     `;
     return;
@@ -152,6 +152,7 @@ function displayCurrentWatching(tracking) {
         youtube: 'YouTube',
         disneyplus: 'Disney+',
         crunchyroll: 'Crunchyroll',
+        primevideo: 'Prime Video',
       }[tracking.platform] ||
       tracking.platform ||
       tracking.hostname ||
