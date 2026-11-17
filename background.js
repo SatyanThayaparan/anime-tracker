@@ -1,330 +1,292 @@
 import { extractHostname } from './utils/categories.js';
-import { isAnimeSite } from './utils/shows.js';
+import { isWatchSite } from './utils/shows.js';
+import { getDateKey } from './utils/storage.js';
 
-// Tracking state
-let currentTracking = {
-  tabId: null,
-  url: null,
-  hostname: null,
-  showName: null,
-  episodeNumber: null,
-  startTime: null,
-  lastActivityTime: null,
-  isActive: true,
-  videoProgress: null  // Current video progress state
-};
+const SCHEMA_VERSION = 1;
+const ALARM_SAVE = 'anime-tracker-save';
 
-// Configuration
 const CONFIG = {
-  SAVE_INTERVAL: 5000,        // Save to storage every 5 seconds
-  IDLE_THRESHOLD: 60,         // Seconds of inactivity before considered idle
-  SESSION_TIMEOUT: 1800000,   // 30 minutes for new session
-  ACTIVITY_TIMEOUT: 60000     // 60 seconds without activity = idle
+  IDLE_THRESHOLD: 60,
+  SESSION_TIMEOUT: 30 * 60 * 1000,
+  MIN_SAVE_MS: 1000,
 };
 
-// Initialize
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Anime Tracker installed');
-  initializeStorage();
-});
+let currentTracking = emptyTracking();
+let lastHeartbeatAt = null;
+let listenersBound = false;
 
-chrome.runtime.onStartup.addListener(() => {
-  console.log('Anime Tracker started');
-  startTracking();
-});
+function emptyTracking() {
+  return {
+    tabId: null,
+    url: null,
+    hostname: null,
+    platform: null,
+    showName: null,
+    episodeNumber: null,
+    episodeLabel: null,
+    startTime: null,
+    lastActivityTime: null,
+    isActive: false,
+    videoProgress: null,
+  };
+}
 
-// Start tracking on load
-startTracking();
-
-/**
- * Initialize storage with default settings
- */
 async function initializeStorage() {
-  const data = await chrome.storage.local.get(['settings']);
-  
+  const data = await chrome.storage.local.get(['settings', 'meta']);
+  const patch = {};
+
+  if (!data.meta) {
+    patch.meta = {
+      schemaVersion: SCHEMA_VERSION,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
   if (!data.settings) {
-    await chrome.storage.local.set({
-      settings: {
-        idleThreshold: CONFIG.IDLE_THRESHOLD,
-        sessionTimeout: CONFIG.SESSION_TIMEOUT,
-        customCategories: null
-      }
-    });
+    patch.settings = {
+      idleThreshold: CONFIG.IDLE_THRESHOLD,
+      sessionTimeout: CONFIG.SESSION_TIMEOUT,
+    };
+  }
+
+  if (Object.keys(patch).length) {
+    await chrome.storage.local.set(patch);
   }
 }
 
-/**
- * Start the tracking system
- */
-function startTracking() {
-  // Set up idle detection
+function ensureListeners() {
+  if (listenersBound) return;
+  listenersBound = true;
+
   chrome.idle.setDetectionInterval(CONFIG.IDLE_THRESHOLD);
-  
-  // Listen for idle state changes
   chrome.idle.onStateChanged.addListener(handleIdleStateChange);
-  
-  // Listen for tab changes
   chrome.tabs.onActivated.addListener(handleTabActivated);
   chrome.tabs.onUpdated.addListener(handleTabUpdated);
   chrome.tabs.onRemoved.addListener(handleTabRemoved);
-  
-  // Listen for window focus changes
   chrome.windows.onFocusChanged.addListener(handleWindowFocusChanged);
-  
-  // Listen for messages from content scripts
   chrome.runtime.onMessage.addListener(handleMessage);
-  
-  // Set up periodic saving
-  setInterval(saveCurrentSession, CONFIG.SAVE_INTERVAL);
-  
-  // Get current active tab
-  getCurrentTab();
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === ALARM_SAVE) {
+      void saveCurrentSession();
+    }
+  });
 }
 
-/**
- * Get the current active tab and start tracking
- */
+async function startTracking() {
+  ensureListeners();
+  await chrome.alarms.create(ALARM_SAVE, { periodInMinutes: 1 });
+  await getCurrentTab();
+}
+
 async function getCurrentTab() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.url) {
-      startTrackingTab(tab.id, tab.url);
+    if (tab?.id != null && tab.url) {
+      await startTrackingTab(tab.id, tab.url);
     }
-  } catch (e) {
-    console.error('Error getting current tab:', e);
+  } catch (error) {
+    console.error('[Anime Tracker] getCurrentTab failed', error);
   }
 }
 
-/**
- * Start tracking a new tab
- */
-function startTrackingTab(tabId, url) {
-  // Save previous session before switching
-  saveCurrentSession();
-  
+async function startTrackingTab(tabId, url) {
+  await saveCurrentSession();
+
   const hostname = extractHostname(url);
-  
-  // Skip tracking for chrome:// urls, extensions, etc.
-  if (!hostname || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-    currentTracking = {
-      tabId: null,
-      url: null,
-      hostname: null,
-      showName: null,
-      episodeNumber: null,
-      startTime: null,
-      lastActivityTime: null,
-      isActive: false
-    };
+  if (!hostname || !url || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+    currentTracking = emptyTracking();
     return;
   }
-  
-  // Only track anime sites
-  if (!isAnimeSite(url)) {
-    currentTracking = {
-      tabId: null,
-      url: null,
-      hostname: null,
-      showName: null,
-      episodeNumber: null,
-      startTime: null,
-      lastActivityTime: null,
-      isActive: false
-    };
+
+  if (!isWatchSite(url)) {
+    currentTracking = emptyTracking();
     return;
   }
-  
+
   const now = Date.now();
-  
   currentTracking = {
     tabId,
     url,
     hostname,
-    showName: null,  // Will be updated from content script
-    episodeNumber: null,  // Will be updated from content script
+    platform: hostname.includes('netflix')
+      ? 'netflix'
+      : hostname.includes('disney')
+        ? 'disneyplus'
+        : 'youtube',
+    showName: null,
+    episodeNumber: null,
+    episodeLabel: null,
     startTime: now,
     lastActivityTime: now,
-    isActive: true
+    isActive: true,
+    videoProgress: null,
   };
 }
 
-/**
- * Handle tab activation (switching tabs)
- */
 async function handleTabActivated(activeInfo) {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    if (tab && tab.url) {
-      startTrackingTab(tab.id, tab.url);
-    }
-  } catch (e) {
-    console.error('Error handling tab activation:', e);
+    if (tab?.url) await startTrackingTab(tab.id, tab.url);
+  } catch (error) {
+    console.error('[Anime Tracker] tab activate failed', error);
   }
 }
 
-/**
- * Handle tab URL updates (navigation within tab)
- */
 function handleTabUpdated(tabId, changeInfo, tab) {
   if (changeInfo.url && tabId === currentTracking.tabId) {
-    startTrackingTab(tabId, changeInfo.url);
+    void startTrackingTab(tabId, changeInfo.url);
+  } else if (changeInfo.status === 'complete' && tab?.active && tab.url) {
+    void startTrackingTab(tabId, tab.url);
   }
 }
 
-/**
- * Handle tab removal
- */
 function handleTabRemoved(tabId) {
-  if (tabId === currentTracking.tabId) {
-    saveCurrentSession();
-    currentTracking = {
-      tabId: null,
-      url: null,
-      hostname: null,
-      category: null,
-      startTime: null,
-      lastActivityTime: null,
-      isActive: false
-    };
-  }
+  if (tabId !== currentTracking.tabId) return;
+  void saveCurrentSession().then(() => {
+    currentTracking = emptyTracking();
+  });
 }
 
-/**
- * Handle window focus changes
- */
 async function handleWindowFocusChanged(windowId) {
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    // Browser lost focus
     currentTracking.isActive = false;
-    saveCurrentSession();
-  } else {
-    // Browser gained focus, get active tab
-    currentTracking.isActive = true;
-    await getCurrentTab();
+    await saveCurrentSession();
+    return;
   }
+  currentTracking.isActive = true;
+  await getCurrentTab();
 }
 
-/**
- * Handle idle state changes
- */
 function handleIdleStateChange(state) {
   if (state === 'idle' || state === 'locked') {
     currentTracking.isActive = false;
-    saveCurrentSession();
-  } else if (state === 'active') {
-    currentTracking.isActive = true;
-    if (currentTracking.hostname) {
-      currentTracking.lastActivityTime = Date.now();
-    }
+    void saveCurrentSession();
+    return;
+  }
+
+  currentTracking.isActive = true;
+  if (currentTracking.hostname) {
+    currentTracking.lastActivityTime = Date.now();
+    if (!currentTracking.startTime) currentTracking.startTime = Date.now();
   }
 }
 
-/**
- * Handle messages from content scripts
- */
 function handleMessage(message, sender, sendResponse) {
-  if (message.type === 'ACTIVITY') {
-    // User activity detected on page
-    if (sender.tab && sender.tab.id === currentTracking.tabId) {
+  if (message?.type === 'ACTIVITY') {
+    lastHeartbeatAt = Date.now();
+    const senderTabId = sender.tab?.id;
+
+    if (senderTabId != null && currentTracking.tabId == null) {
+      void startTrackingTab(senderTabId, message.url || sender.tab.url || '');
+    }
+
+    if (senderTabId != null && senderTabId === currentTracking.tabId) {
       currentTracking.lastActivityTime = Date.now();
       currentTracking.isActive = true;
-      
-      // Update show info if provided
-      if (message.showInfo) {
-        const showChanged = currentTracking.showName !== message.showInfo.showName ||
-                           currentTracking.episodeNumber !== message.showInfo.episodeNumber;
-        
-        // If show or episode changed, save current session and start new one
-        if (showChanged && currentTracking.showName) {
-          saveCurrentSession();
-          currentTracking.startTime = Date.now();
+      if (!currentTracking.startTime) currentTracking.startTime = Date.now();
+
+      if (message.showInfo?.showName) {
+        const nextName = message.showInfo.showName;
+        const nextEpisode =
+          message.showInfo.episodeNumber ?? message.showInfo.episodeLabel ?? null;
+        const prevEpisode =
+          currentTracking.episodeNumber ?? currentTracking.episodeLabel ?? null;
+        const changed =
+          currentTracking.showName &&
+          (currentTracking.showName !== nextName || String(prevEpisode) !== String(nextEpisode));
+
+        if (changed) {
+          void saveCurrentSession().then(() => {
+            currentTracking.startTime = Date.now();
+          });
         }
-        
-        currentTracking.showName = message.showInfo.showName;
-        currentTracking.episodeNumber = message.showInfo.episodeNumber;
+
+        currentTracking.showName = nextName;
+        currentTracking.episodeNumber = message.showInfo.episodeNumber ?? null;
+        currentTracking.episodeLabel = message.showInfo.episodeLabel ?? null;
+        if (message.showInfo.site) currentTracking.platform = message.showInfo.site;
       }
-      
-      // Update video progress if provided
-      if (message.videoProgress) {
-        currentTracking.videoProgress = message.videoProgress;
-      } else {
-        currentTracking.videoProgress = null;
-      }
+
+      currentTracking.videoProgress = message.videoProgress || null;
+      if (message.url) currentTracking.url = message.url;
     }
+
     sendResponse({ received: true });
-  } else if (message.type === 'GET_TRACKING_STATE') {
-    sendResponse({ tracking: currentTracking });
+    return true;
   }
-  
-  return true; // Keep message channel open for async response
+
+  if (message?.type === 'GET_TRACKING_STATE') {
+    sendResponse({
+      tracking: currentTracking,
+      debug: {
+        lastHeartbeatAt,
+        schemaVersion: SCHEMA_VERSION,
+        alarm: ALARM_SAVE,
+      },
+    });
+    return true;
+  }
+
+  return false;
 }
 
-/**
- * Save current tracking session to storage
- */
 async function saveCurrentSession() {
   if (!currentTracking.hostname || !currentTracking.startTime || !currentTracking.showName) {
     return;
   }
-  
+
   const now = Date.now();
-  const sessionDuration = now - currentTracking.startTime;
-  
-  // Calculate active vs idle time
-  let activeTime = sessionDuration;
-  if (!currentTracking.isActive) {
-    // If currently idle, only count time up to last activity
-    const timeSinceActivity = now - currentTracking.lastActivityTime;
-    activeTime = Math.max(0, sessionDuration - timeSinceActivity);
+  let sessionDuration = now - currentTracking.startTime;
+
+  if (!currentTracking.isActive && currentTracking.lastActivityTime) {
+    sessionDuration = Math.max(0, currentTracking.lastActivityTime - currentTracking.startTime);
   }
-  
-  // Get today's date key
+
+  if (sessionDuration < CONFIG.MIN_SAVE_MS) {
+    return;
+  }
+
   const dateKey = getDateKey(new Date());
-  const hour = new Date().getHours().toString().padStart(2, '0');
-  
+  const hour = String(new Date().getHours()).padStart(2, '0');
+
   try {
-    // Get existing data
     const data = await chrome.storage.local.get([dateKey, 'lastVisits']);
     const dayData = data[dateKey] || { shows: {}, dailyStats: {} };
     const lastVisits = data.lastVisits || {};
-    
-    // Initialize daily stats if needed
+
     if (!dayData.dailyStats) {
-      dayData.dailyStats = {
-        totalTime: 0,
-        episodesWatched: 0,
-        showsActive: 0
-      };
+      dayData.dailyStats = { totalTime: 0, episodesWatched: 0, showsActive: 0 };
     }
-    
-    // Update show data
+
     if (!dayData.shows[currentTracking.showName]) {
       dayData.shows[currentTracking.showName] = {
         site: currentTracking.hostname,
+        platform: currentTracking.platform,
         totalTime: 0,
         activeTime: 0,
         episodes: {},
         sessions: 0,
         lastWatched: now,
-        hourly: {}
+        hourly: {},
       };
     }
-    
+
     const showData = dayData.shows[currentTracking.showName];
     showData.totalTime += sessionDuration;
-    showData.activeTime += activeTime;
+    showData.activeTime += sessionDuration;
     showData.lastWatched = now;
-    
-    // Update hourly breakdown
-    if (!showData.hourly[hour]) {
-      showData.hourly[hour] = 0;
-    }
-    showData.hourly[hour] += sessionDuration;
-    
-    // Track episode if we have episode number
-    if (currentTracking.episodeNumber !== null) {
-      const episodeKey = currentTracking.episodeNumber.toString();
-      
+    showData.site = currentTracking.hostname;
+    showData.platform = currentTracking.platform;
+    showData.hourly[hour] = (showData.hourly[hour] || 0) + sessionDuration;
+
+    const episodeKey =
+      currentTracking.episodeNumber != null
+        ? String(currentTracking.episodeNumber)
+        : currentTracking.episodeLabel
+          ? String(currentTracking.episodeLabel)
+          : null;
+
+    if (episodeKey) {
       if (!showData.episodes[episodeKey]) {
         showData.episodes[episodeKey] = {
           time: 0,
@@ -333,108 +295,70 @@ async function saveCurrentSession() {
           duration: 0,
           completed: false,
           timestamp: now,
-          sessions: 0
+          sessions: 0,
+          label: currentTracking.episodeLabel || episodeKey,
         };
       }
-      
+
       const episodeData = showData.episodes[episodeKey];
       episodeData.time += sessionDuration;
       episodeData.timestamp = now;
-      
-      // Update progress from video player if available
-      if (currentTracking.videoProgress) {
-        const vp = currentTracking.videoProgress;
-        
-        // Update duration if we have it and it's valid
-        if (vp.duration > 0) {
-          episodeData.duration = vp.duration;
-        }
-        
-        // Update current time and progress
-        if (vp.currentTime >= 0 && vp.duration > 0) {
+      if (currentTracking.episodeLabel) episodeData.label = currentTracking.episodeLabel;
+
+      const vp = currentTracking.videoProgress;
+      if (vp?.duration > 0) {
+        episodeData.duration = vp.duration;
+        if (vp.currentTime >= 0) {
           episodeData.currentTime = vp.currentTime;
           episodeData.progress = vp.progress;
-          
-          // Mark as completed if progress >= 0.8 (80%)
-          if (vp.progress >= 0.8) {
-            episodeData.completed = true;
-          }
-        } else if (vp.duration > 0) {
-          // If we have duration but no current time, estimate progress from time watched
-          episodeData.progress = Math.min(1, episodeData.time / (vp.duration * 1000));
-          if (episodeData.progress >= 0.8) {
-            episodeData.completed = true;
-          }
-        }
-      } else {
-        // Fallback: Mark as completed if watched for more than 80% of typical episode (20 minutes)
-        const typicalEpisodeLength = 20 * 60 * 1000; // 20 minutes in ms
-        if (episodeData.time >= typicalEpisodeLength * 0.8) {
-          episodeData.completed = true;
-          episodeData.progress = 1.0;
-        } else if (episodeData.duration > 0) {
-          // Estimate progress from time watched
-          episodeData.progress = Math.min(1, episodeData.time / (episodeData.duration * 1000));
+          if (vp.progress >= 0.8) episodeData.completed = true;
         }
       }
     }
-    
-    // Check if this is a new visit (session)
-    const lastVisitKey = `${currentTracking.showName}_${currentTracking.hostname}`;
-    const lastVisit = lastVisits[lastVisitKey] || 0;
-    const isNewSession = now - lastVisit > CONFIG.SESSION_TIMEOUT;
-    
-    if (isNewSession) {
+
+    const visitKey = `${currentTracking.showName}_${currentTracking.hostname}`;
+    const lastVisit = lastVisits[visitKey] || 0;
+    if (now - lastVisit > CONFIG.SESSION_TIMEOUT) {
       showData.sessions += 1;
-      lastVisits[lastVisitKey] = now;
-      
-      // Increment episode session count if we have episode number
-      if (currentTracking.episodeNumber !== null) {
-        const episodeKey = currentTracking.episodeNumber.toString();
-        if (showData.episodes[episodeKey]) {
-          showData.episodes[episodeKey].sessions = (showData.episodes[episodeKey].sessions || 0) + 1;
-        }
+      lastVisits[visitKey] = now;
+      if (episodeKey && showData.episodes[episodeKey]) {
+        showData.episodes[episodeKey].sessions =
+          (showData.episodes[episodeKey].sessions || 0) + 1;
       }
     }
-    
-    // Update daily stats
+
     dayData.dailyStats.totalTime += sessionDuration;
-    
-    // Count unique shows
-    const uniqueShows = new Set(Object.keys(dayData.shows));
-    dayData.dailyStats.showsActive = uniqueShows.size;
-    
-    // Count completed episodes
-    let totalEpisodes = 0;
-    for (const show of Object.values(dayData.shows)) {
-      for (const episode of Object.values(show.episodes || {})) {
-        if (episode.completed) {
-          totalEpisodes++;
-        }
-      }
-    }
-    dayData.dailyStats.episodesWatched = totalEpisodes;
-    
-    // Save updated data
+    dayData.dailyStats.showsActive = Object.keys(dayData.shows).length;
+    dayData.dailyStats.episodesWatched = Object.values(dayData.shows).reduce((sum, show) => {
+      return (
+        sum +
+        Object.values(show.episodes || {}).filter((episode) => episode.completed).length
+      );
+    }, 0);
+
     await chrome.storage.local.set({
       [dateKey]: dayData,
-      lastVisits: lastVisits
+      lastVisits,
+      meta: {
+        schemaVersion: SCHEMA_VERSION,
+        updatedAt: new Date().toISOString(),
+      },
     });
-    
-    // Reset start time for next interval
+
     currentTracking.startTime = now;
-    
-  } catch (e) {
-    console.error('Error saving session:', e);
+  } catch (error) {
+    console.error('[Anime Tracker] save failed', error);
   }
 }
 
-/**
- * Get date key in YYYY-MM-DD format
- */
-function getDateKey(date) {
-  return date.toISOString().split('T')[0];
-}
+chrome.runtime.onInstalled.addListener(() => {
+  void initializeStorage().then(startTracking);
+});
 
-// Export for testing
+chrome.runtime.onStartup.addListener(() => {
+  void startTracking();
+});
+
+void initializeStorage().then(startTracking);
+
 export { currentTracking, CONFIG };

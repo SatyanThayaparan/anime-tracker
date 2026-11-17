@@ -4,12 +4,15 @@
  */
 
 /**
- * Get date key in YYYY-MM-DD format
- * @param {Date} date 
+ * Get local date key in YYYY-MM-DD format
+ * @param {Date} date
  * @returns {string}
  */
-export function getDateKey(date) {
-  return date.toISOString().split('T')[0];
+export function getDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -353,8 +356,9 @@ export async function cleanupOldData(daysToKeep = 90) {
 export async function exportData() {
   const allData = await chrome.storage.local.get(null);
   return {
+    schemaVersion: allData.meta?.schemaVersion || 1,
     exportDate: new Date().toISOString(),
-    data: allData
+    data: allData,
   };
 }
 
