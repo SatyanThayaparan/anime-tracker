@@ -1,5 +1,5 @@
 /**
- * Content script for Netflix / YouTube / Disney+.
+ * Content script for Netflix / YouTube / Disney+ / Crunchyroll.
  * Loads utils via chrome.runtime.getURL so MV3 content scripts can use modules.
  * Re-injectable after extension reload (tears down any previous instance first).
  */

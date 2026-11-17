@@ -2,7 +2,7 @@
 
 ## What this project is
 
-**Shiori** (*bookmark*) is a Chrome extension that tracks watching time on **Netflix**, **YouTube**, and **Disney+**. It records titles (and episode labels when available), accumulates watch time with idle awareness, and shows daily/weekly/monthly stats in a popup and dashboard. All data stays local.
+**Shiori** (*bookmark*) is a Chrome extension that tracks watching time on **Netflix**, **YouTube**, **Disney+**, and **Crunchyroll**. It records titles (and episode labels when available), accumulates watch time with idle awareness, and shows daily/weekly/monthly stats in a popup and dashboard. All data stays local.
 
 > GitHub: [`anime-tracker`](https://github.com/SatyanThayaparan/anime-tracker)
 
@@ -19,8 +19,8 @@
 ## How the logic works
 
 1. **Content script** loads `utils/shows.js` via `chrome.runtime.getURL`, reads title/episode cues, and sends heartbeats.
-2. **Background worker** only tracks Netflix / YouTube / Disney+ tabs, pauses on idle/blur, and writes time into local day keys.
-3. **Platform parsers** extract titles (YouTube also channel; Netflix/Disney+ try season/episode text).
+2. **Background worker** only tracks Netflix / YouTube / Disney+ / Crunchyroll tabs, pauses on idle/blur, and writes time into local day keys.
+3. **Platform parsers** extract titles (YouTube also channel; Netflix/Disney+/Crunchyroll try season/episode text).
 4. **Popup** shows now watching + today’s totals + a debug strip (site / active / last heartbeat).
 5. **Dashboard** aggregates ranges, charts, export, and clear.
 
@@ -31,7 +31,7 @@
 | `manifest.json` | Narrow host permissions, content scripts, web-accessible utils, CSP |
 | `background.js` | Session state, alarms, storage writes |
 | `content.js` | Heartbeats + player probing on supported pages |
-| `utils/shows.js` | Netflix / YouTube / Disney+ extraction |
+| `utils/shows.js` | Netflix / YouTube / Disney+ / Crunchyroll extraction |
 | `utils/storage.js` | Local date keys, aggregation, export/clear |
 | `popup/` | Now watching UI |
 | `dashboard/` | Overview / shows / settings |

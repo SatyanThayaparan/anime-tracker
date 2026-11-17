@@ -6,7 +6,7 @@ import {
   verifyAnimeTitle,
 } from './utils/anilist.js';
 import { extractHostname } from './utils/categories.js';
-import { isPlayerPage, isWatchSite } from './utils/shows.js';
+import { getPlatform, isPlayerPage, isWatchSite } from './utils/shows.js';
 import { episodeStorageKey, isUiNoiseTitle } from './utils/normalize.js';
 import {
   CURRENT_SCHEMA_VERSION,
@@ -204,6 +204,7 @@ async function injectIntoOpenWatchTabs() {
         '*://*.youtube.com/*',
         '*://youtu.be/*',
         '*://*.disneyplus.com/*',
+        '*://*.crunchyroll.com/*',
       ],
     });
 
@@ -277,11 +278,7 @@ async function startTrackingTab(tabId, url) {
     tabId,
     url,
     hostname,
-    platform: hostname.includes('netflix')
-      ? 'netflix'
-      : hostname.includes('disney')
-        ? 'disneyplus'
-        : 'youtube',
+    platform: getPlatform(url) || 'unknown',
     showName: null,
     seasonNumber: null,
     episodeNumber: null,

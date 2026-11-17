@@ -51,7 +51,7 @@ function loadCurrentWatching() {
           <div class="empty-state">
             <div class="empty-state-icon">⏳</div>
             <div class="empty-state-title">Extension waking up</div>
-            <div class="empty-state-subtitle">Open a Netflix/YouTube/Disney+ tab, then reopen this popup</div>
+            <div class="empty-state-subtitle">Open a Netflix/YouTube/Disney+/Crunchyroll tab, then reopen this popup</div>
           </div>
         `;
       });
@@ -122,7 +122,7 @@ function displayCurrentWatching(tracking) {
       <div class="empty-state">
         <div class="empty-state-icon">📺</div>
         <div class="empty-state-title">Not watching anything</div>
-        <div class="empty-state-subtitle">Open Netflix, YouTube, or Disney+ to start tracking</div>
+        <div class="empty-state-subtitle">Open Netflix, YouTube, Disney+, or Crunchyroll to start tracking</div>
       </div>
     `;
     return;
@@ -145,7 +145,18 @@ function displayCurrentWatching(tracking) {
           ? `Season ${seasonNum}`
           : 'Episode in progress';
 
-  const site = tracking.platform || tracking.hostname || 'streaming site';
+  const site =
+    (
+      {
+        netflix: 'Netflix',
+        youtube: 'YouTube',
+        disneyplus: 'Disney+',
+        crunchyroll: 'Crunchyroll',
+      }[tracking.platform] ||
+      tracking.platform ||
+      tracking.hostname ||
+      'streaming site'
+    );
   const paused = tracking.videoProgress?.paused;
   const inactive = tracking.isActive === false;
   const anime = tracking.animeMatch;

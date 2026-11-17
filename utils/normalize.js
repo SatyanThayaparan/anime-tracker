@@ -8,11 +8,12 @@ const SERVICE_NAMES = new Set([
   'disney+',
   'disney plus',
   'disneyplus',
+  'crunchyroll',
   'anime tracker',
   'shiori',
 ]);
 
-/** Disney+/Netflix chrome that must never become a “show”. */
+/** Streaming chrome that must never become a “show”. */
 const UI_NOISE_TITLES = new Set([
   'select profile',
   'who is watching',
@@ -37,6 +38,13 @@ const UI_NOISE_TITLES = new Set([
   'disney plus',
   'netflix',
   'youtube',
+  'crunchyroll',
+  'watchlist',
+  'history',
+  'my lists',
+  'simulcast season',
+  'popular',
+  'new',
 ]);
 
 export function cleanText(value) {
@@ -204,6 +212,8 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
     .replace(/\s*[-–|]\s*Netflix.*$/i, '')
     .replace(/\s*[-–|]\s*YouTube.*$/i, '')
     .replace(/\s*[-–|]\s*Disney\+.*$/i, '')
+    .replace(/\s*[-–|]\s*Watch on Crunchyroll.*$/i, '')
+    .replace(/\s*[-–|]\s*Crunchyroll.*$/i, '')
     .trim();
 
   if (isServiceName(title) || isUiNoiseTitle(title)) return null;

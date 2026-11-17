@@ -1,5 +1,5 @@
 /**
- * Platform detection + title/episode extraction for Netflix, YouTube, Disney+.
+ * Platform detection + title/episode extraction for Netflix, YouTube, Disney+, Crunchyroll.
  */
 
 import {
@@ -15,6 +15,7 @@ export const WATCH_SITES = [
   'youtube.com',
   'youtu.be',
   'disneyplus.com',
+  'crunchyroll.com',
 ];
 
 /**
@@ -35,7 +36,7 @@ export const isAnimeSite = isWatchSite;
 
 /**
  * @param {string} url
- * @returns {'netflix'|'youtube'|'disneyplus'|null}
+ * @returns {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|null}
  */
 export function getPlatform(url) {
   try {
@@ -43,6 +44,7 @@ export function getPlatform(url) {
     if (host.includes('netflix')) return 'netflix';
     if (host.includes('youtube') || host === 'youtu.be') return 'youtube';
     if (host.includes('disneyplus')) return 'disneyplus';
+    if (host.includes('crunchyroll')) return 'crunchyroll';
     return null;
   } catch {
     return null;
@@ -94,7 +96,7 @@ export function findVideoPlayer(doc = document) {
 /**
  * True when the URL is a playback page (not browse/search/profile).
  * @param {string} url
- * @param {'netflix'|'youtube'|'disneyplus'|null} [platform]
+ * @param {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|null} [platform]
  */
 export function isPlayerPage(url, platform = getPlatform(url)) {
   try {
@@ -108,6 +110,7 @@ export function isPlayerPage(url, platform = getPlatform(url)) {
         path.includes('/watch/')
       );
     }
+    if (platform === 'crunchyroll') return path.includes('/watch/');
     return false;
   } catch {
     return false;
@@ -388,6 +391,95 @@ function parseDisneyPlus(url, doc = document) {
   };
 }
 
+function extractCrunchyrollSeason(doc = document) {
+  const seasonText = firstText(
+    [
+      '[class*="season-select"]',
+      '[class*="seasonSelect"]',
+      '[data-t*="season"]',
+      '.erc-season-select',
+      'div[class*="season"] button',
+      'button[aria-label*="Season" i]',
+    ],
+    doc
+  );
+  const fromLabel = parseSeasonOnly(seasonText);
+  if (fromLabel != null) return fromLabel;
+
+  const meta = cleanText(doc.querySelector('meta[property="og:description"]')?.content || '');
+  return parseSeasonOnly(meta);
+}
+
+function parseCrunchyroll(url, doc = document) {
+  if (!isPlayerPage(url, 'crunchyroll')) return null;
+
+  // Series title sits beside the player; episode title is the big h1.
+  let showCandidate = firstText(
+    [
+      '.show-title-link h4',
+      'a.show-title-link',
+      '.show-title-link',
+      '[data-t="series-title"]',
+      '.erc-current-media-info a[href*="/series/"]',
+      '.hero-heading-line h1',
+    ],
+    doc
+  );
+
+  let episodeCandidate = firstText(
+    [
+      '.erc-current-media-info h1.title',
+      '.erc-current-media-info h1',
+      '.current-media-wrapper h1',
+      'h1.title',
+      '[data-t="episode-title"]',
+    ],
+    doc
+  );
+
+  if (episodeCandidate && isUiNoiseTitle(episodeCandidate)) episodeCandidate = '';
+
+  // Tab title fallback: "Show Name Episode 12 - Watch on Crunchyroll"
+  const docTitle = cleanText(
+    doc.title
+      .replace(/\s*[-–|]\s*Watch on Crunchyroll.*$/i, '')
+      .replace(/\s*[-–|]\s*Crunchyroll.*$/i, '')
+  );
+
+  if (!showCandidate && docTitle) {
+    const fromDoc = normalizeWatchIdentity(docTitle, episodeCandidate);
+    if (fromDoc?.showName) showCandidate = fromDoc.showName;
+  }
+
+  if (!showCandidate) {
+    showCandidate =
+      cleanText(doc.querySelector('meta[property="og:title"]')?.content) || docTitle;
+  }
+
+  const normalized = normalizeWatchIdentity(showCandidate, episodeCandidate || docTitle);
+  if (!normalized || isUiNoiseTitle(normalized.showName)) return null;
+
+  const episodeParsed =
+    parseEpisodeLabel(episodeCandidate) || parseEpisodeLabel(docTitle);
+  const episodeNumber = episodeParsed?.episodeNumber ?? normalized.episodeNumber;
+  let seasonNumber = episodeParsed?.seasonNumber ?? normalized.seasonNumber ?? null;
+  if (seasonNumber == null) seasonNumber = extractCrunchyrollSeason(doc);
+
+  const episodeLabel =
+    episodeParsed?.episodeLabel ||
+    normalized.episodeLabel ||
+    (episodeCandidate && !episodeParsed ? cleanText(episodeCandidate) : null);
+
+  return {
+    showName: normalized.showName,
+    seasonNumber,
+    episodeNumber,
+    episodeLabel,
+    site: 'crunchyroll',
+    url,
+  };
+}
+
 /**
  * Extract watch metadata for the current page.
  * @param {string} url
@@ -401,6 +493,7 @@ export function extractShowInfo(url, doc = document) {
     if (platform === 'youtube') return parseYouTube(url, doc);
     if (platform === 'netflix') return parseNetflix(url, doc);
     if (platform === 'disneyplus') return parseDisneyPlus(url, doc);
+    if (platform === 'crunchyroll') return parseCrunchyroll(url, doc);
   } catch (error) {
     console.debug('[Shiori] extractShowInfo failed', error);
   }

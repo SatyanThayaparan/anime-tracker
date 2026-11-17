@@ -22,6 +22,7 @@ function platformKey(show) {
   if (raw.includes('netflix')) return 'netflix';
   if (raw.includes('disney')) return 'disneyplus';
   if (raw.includes('youtube') || raw.includes('youtu')) return 'youtube';
+  if (raw.includes('crunchyroll')) return 'crunchyroll';
   if (!raw) return 'unknown';
   return raw;
 }
@@ -32,6 +33,7 @@ function platformLabel(key) {
       netflix: 'Netflix',
       disneyplus: 'Disney+',
       youtube: 'YouTube',
+      crunchyroll: 'Crunchyroll',
       unknown: 'Unknown',
     }[key] || key
   );
