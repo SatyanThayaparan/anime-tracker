@@ -1,22 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Anime Tracker">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#3b82f6"/>
-      <stop offset="100%" style="stop-color:#1d4ed8"/>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#cfe6f0"/>
+      <stop offset="55%" stop-color="#e7f2f6"/>
+      <stop offset="100%" stop-color="#d7e8c9"/>
     </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a98467"/>
+      <stop offset="100%" stop-color="#7a5a42"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="70%" cy="72%" r="35%">
+      <stop offset="0%" stop-color="#f0c36a" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#f0c36a" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  
-  <!-- Background -->
-  <rect width="128" height="128" rx="24" fill="url(#bgGrad)"/>
-  
-  <!-- Chart bars -->
-  <rect x="24" y="70" width="16" height="34" rx="4" fill="white" opacity="0.9"/>
-  <rect x="48" y="50" width="16" height="54" rx="4" fill="white" opacity="0.9"/>
-  <rect x="72" y="36" width="16" height="68" rx="4" fill="white" opacity="0.9"/>
-  <rect x="96" y="56" width="16" height="48" rx="4" fill="white" opacity="0.9"/>
-  
-  <!-- Clock/time indicator -->
-  <circle cx="100" cy="32" r="16" fill="white" opacity="0.9"/>
-  <line x1="100" y1="32" x2="100" y2="24" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
-  <line x1="100" y1="32" x2="108" y2="32" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+  <!-- soft badge -->
+  <circle cx="64" cy="64" r="60" fill="url(#sky)"/>
+  <circle cx="64" cy="64" r="60" fill="none" stroke="#3f5f4e" stroke-opacity="0.12" stroke-width="2"/>
+  <!-- distant hills -->
+  <path d="M18 86 C34 70 48 74 64 80 C80 74 96 66 110 84 L110 104 L18 104 Z" fill="#6f8f78" opacity="0.55"/>
+  <path d="M22 94 C40 82 54 86 68 92 C84 84 98 80 108 94 L108 104 L22 104 Z" fill="#3f5f4e" opacity="0.45"/>
+  <!-- window frame -->
+  <rect x="34" y="30" width="60" height="68" rx="8" fill="url(#wood)"/>
+  <rect x="40" y="36" width="48" height="56" rx="4" fill="#eaf4f8"/>
+  <!-- inner landscape -->
+  <path d="M40 72 C50 60 58 62 64 66 C72 60 80 58 88 70 L88 92 L40 92 Z" fill="#7ea089"/>
+  <path d="M40 80 C52 72 60 74 68 78 C76 72 84 72 88 80 L88 92 L40 92 Z" fill="#3f5f4e"/>
+  <circle cx="78" cy="48" r="6" fill="#f4d7a1" opacity="0.85"/>
+  <circle cx="64" cy="78" r="18" fill="url(#glow)"/>
+  <!-- mullion -->
+  <rect x="62" y="36" width="4" height="56" fill="#7a5a42" opacity="0.55"/>
+  <rect x="40" y="62" width="48" height="4" fill="#7a5a42" opacity="0.55"/>
+  <!-- rust leaf accent (10%) -->
+  <path d="M92 28 C98 22 108 24 110 32 C104 36 96 36 92 28 Z" fill="#c04028"/>
+  <path d="M96 30 L104 34" stroke="#7a2a1c" stroke-width="1.2" stroke-linecap="round"/>
 </svg>

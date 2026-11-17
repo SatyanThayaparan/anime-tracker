@@ -2,6 +2,8 @@
  * Platform detection + title/episode extraction for Netflix, YouTube, Disney+.
  */
 
+import { cleanText, normalizeWatchIdentity, parseEpisodeLabel } from './normalize.js';
+
 export const WATCH_SITES = [
   'netflix.com',
   'youtube.com',
@@ -41,13 +43,6 @@ export function getPlatform(url) {
   }
 }
 
-function cleanText(value) {
-  return String(value || '')
-    .replace(/\s+/g, ' ')
-    .replace(/\u00a0/g, ' ')
-    .trim();
-}
-
 function firstText(selectors, root = document) {
   for (const selector of selectors) {
     const el = root.querySelector(selector);
@@ -57,27 +52,11 @@ function firstText(selectors, root = document) {
   return '';
 }
 
-function parseEpisodeLabel(text) {
-  const raw = cleanText(text);
-  if (!raw) return null;
-
-  const seasonEpisode = raw.match(/S(?:eason)?\s*(\d+)\s*E(?:p(?:isode)?)?\s*(\d+)/i);
-  if (seasonEpisode) {
-    return {
-      episodeNumber: Number(seasonEpisode[2]),
-      episodeLabel: `S${seasonEpisode[1]} E${seasonEpisode[2]}`,
-    };
-  }
-
-  const episodeOnly = raw.match(/(?:Ep(?:isode)?|E)\s*(\d+)/i);
-  if (episodeOnly) {
-    return {
-      episodeNumber: Number(episodeOnly[1]),
-      episodeLabel: `Episode ${episodeOnly[1]}`,
-    };
-  }
-
-  return null;
+function childTexts(root, selectors) {
+  if (!root) return [];
+  return selectors
+    .map((selector) => cleanText(root.querySelector(selector)?.textContent || ''))
+    .filter(Boolean);
 }
 
 /**
@@ -104,7 +83,6 @@ function parseYouTube(url, doc = document) {
         'h1.ytd-video-primary-info-renderer',
         '#title h1',
         'h1.title',
-        'meta[name="title"]',
       ],
       doc
     ) ||
@@ -121,10 +99,11 @@ function parseYouTube(url, doc = document) {
     doc
   );
 
-  if (!title) return null;
+  const normalized = normalizeWatchIdentity(title);
+  if (!normalized) return null;
 
   return {
-    showName: title,
+    showName: normalized.showName,
     episodeNumber: null,
     episodeLabel: channel || null,
     site: 'youtube',
@@ -133,38 +112,59 @@ function parseYouTube(url, doc = document) {
 }
 
 function parseNetflix(url, doc = document) {
-  const title =
-    firstText(
+  const titleRoot =
+    doc.querySelector('[data-uia="video-title"]') ||
+    doc.querySelector('.watch-video--player-view [data-uia="video-title"]') ||
+    doc.querySelector('.video-title');
+
+  // Netflix often nests show + episode under the same video-title node.
+  const nested = childTexts(titleRoot, ['h4', 'span', 'p', 'div']);
+  let showCandidate = nested[0] || '';
+  let episodeCandidate = nested.slice(1).join(' · ');
+
+  if (!showCandidate) {
+    showCandidate =
+      firstText(
+        [
+          '[data-uia="video-title"] h4',
+          '.video-title h4',
+          '.watch-video--title-container h4',
+          'h4[data-uia="video-title"]',
+        ],
+        doc
+      ) ||
+      cleanText(doc.querySelector('meta[property="og:title"]')?.content) ||
+      cleanText(doc.title.replace(/\s*[-–|]\s*Netflix.*$/i, ''));
+  }
+
+  if (!episodeCandidate) {
+    episodeCandidate = firstText(
       [
-        '[data-uia="video-title"]',
-        '[data-uia="video-title"] h4',
-        '.video-title h4',
-        '.watch-video--title-container h4',
-        'h4[data-uia="video-title"]',
+        '[data-uia="video-subtitle"]',
+        '[data-uia="episode-title"]',
+        '[data-uia="video-title"] span',
+        '.ellipsis',
       ],
       doc
-    ) ||
-    cleanText(doc.querySelector('meta[property="og:title"]')?.content) ||
-    cleanText(doc.title.replace(/\s*-\s*Netflix.*$/i, ''));
+    );
+  }
 
-  const episodeText = firstText(
-    [
-      '[data-uia="video-subtitle"]',
-      '[data-uia="episode-title"]',
-      '.ellipsis',
-      '.watch-video--bottom-controls-container [data-uia="video-title"] ~ *',
-    ],
-    doc
-  );
+  // If the only scraped string is the whole title blob, let normalizer split E#
+  const normalized = normalizeWatchIdentity(showCandidate, episodeCandidate);
+  if (!normalized) return null;
 
-  const parsed = parseEpisodeLabel(episodeText) || parseEpisodeLabel(doc.title);
-
-  if (!title) return null;
+  // Prefer explicit episode parsing from episode candidate when present
+  const episodeParsed = parseEpisodeLabel(episodeCandidate);
+  const episodeNumber = episodeParsed?.episodeNumber ?? normalized.episodeNumber;
+  const episodeLabel =
+    episodeParsed?.episodeLabel ||
+    normalized.episodeLabel ||
+    (episodeCandidate && !episodeParsed ? cleanText(episodeCandidate) : null);
 
   return {
-    showName: title,
-    episodeNumber: parsed?.episodeNumber ?? null,
-    episodeLabel: parsed?.episodeLabel || episodeText || null,
+    showName: normalized.showName,
+    episodeNumber,
+    episodeLabel,
     site: 'netflix',
     url,
   };
@@ -195,14 +195,13 @@ function parseDisneyPlus(url, doc = document) {
     doc
   );
 
-  const parsed = parseEpisodeLabel(episodeText) || parseEpisodeLabel(doc.title);
-
-  if (!title) return null;
+  const normalized = normalizeWatchIdentity(title, episodeText);
+  if (!normalized) return null;
 
   return {
-    showName: title,
-    episodeNumber: parsed?.episodeNumber ?? null,
-    episodeLabel: parsed?.episodeLabel || episodeText || null,
+    showName: normalized.showName,
+    episodeNumber: normalized.episodeNumber,
+    episodeLabel: normalized.episodeLabel,
     site: 'disneyplus',
     url,
   };
@@ -212,7 +211,6 @@ function parseDisneyPlus(url, doc = document) {
  * Extract watch metadata for the current page.
  * @param {string} url
  * @param {Document|null} doc
- * @returns {{showName:string, episodeNumber:number|null, episodeLabel:string|null, site:string, url:string}|null}
  */
 export function extractShowInfo(url, doc = document) {
   const platform = getPlatform(url);
@@ -226,14 +224,15 @@ export function extractShowInfo(url, doc = document) {
     console.debug('[Anime Tracker] extractShowInfo failed', error);
   }
 
-  // Last-resort fallback so time can still accrue once a title exists.
-  const fallback = cleanText(doc?.title || '');
+  const fallback = normalizeWatchIdentity(doc?.title || '');
   if (!fallback) return null;
   return {
-    showName: fallback,
-    episodeNumber: null,
-    episodeLabel: null,
+    showName: fallback.showName,
+    episodeNumber: fallback.episodeNumber,
+    episodeLabel: fallback.episodeLabel,
     site: platform,
     url,
   };
 }
+
+export { normalizeWatchIdentity, parseEpisodeLabel };

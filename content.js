@@ -1,14 +1,60 @@
 /**
  * Content script for Netflix / YouTube / Disney+.
  * Loads utils via chrome.runtime.getURL so MV3 content scripts can use modules.
+ * Re-injectable after extension reload (tears down any previous instance first).
  */
 
 (async function boot() {
+  // Stop a prior instance left behind after extension reload (dead chrome.runtime).
+  if (typeof globalThis.__ANIME_TRACKER_STOP__ === 'function') {
+    try {
+      globalThis.__ANIME_TRACKER_STOP__();
+    } catch {
+      /* ignore */
+    }
+  }
+
   const HEARTBEAT_INTERVAL = 5000;
   const ACTIVITY_DEBOUNCE = 800;
   const SHOW_INFO_UPDATE_INTERVAL = 8000;
   const VIDEO_UPDATE_INTERVAL = 2000;
   const VIDEO_DETECTION_INTERVAL = 4000;
+
+  let stopped = false;
+  const timers = [];
+  const listeners = [];
+
+  function trackListener(target, event, handler, options) {
+    target.addEventListener(event, handler, options);
+    listeners.push({ target, event, handler, options });
+  }
+
+  function trackInterval(fn, ms) {
+    const id = setInterval(() => {
+      if (!stopped) fn();
+    }, ms);
+    timers.push(id);
+    return id;
+  }
+
+  globalThis.__ANIME_TRACKER_STOP__ = () => {
+    stopped = true;
+    timers.forEach((id) => clearInterval(id));
+    timers.length = 0;
+    listeners.forEach(({ target, event, handler, options }) => {
+      try {
+        target.removeEventListener(event, handler, options);
+      } catch {
+        /* ignore */
+      }
+    });
+    listeners.length = 0;
+    try {
+      if (typeof removeVideoListeners === 'function') removeVideoListeners();
+    } catch {
+      /* ignore */
+    }
+  };
 
   let shows;
   try {
@@ -17,6 +63,8 @@
     console.error('[Anime Tracker] Failed to load shows.js', error);
     return;
   }
+
+  if (stopped) return;
 
   const { extractShowInfo, isWatchSite, findVideoPlayer } = shows;
 
@@ -30,8 +78,10 @@
   let videoEventListeners = [];
   let activityTimeout = null;
   let lastUrl = window.location.href;
+  let observer = null;
 
   function updateShowInfo(force = false) {
+    if (stopped) return;
     const now = Date.now();
     if (!force && now - lastShowInfoUpdate < SHOW_INFO_UPDATE_INTERVAL && currentShowInfo) {
       return;
@@ -59,6 +109,7 @@
   }
 
   function updateVideoProgress() {
+    if (stopped) return;
     if (!currentVideoPlayer) {
       videoProgress = null;
       return;
@@ -88,13 +139,19 @@
     removeVideoListeners();
     currentVideoPlayer = video;
 
+    const onPlayState = (force = false) => {
+      updateVideoProgress();
+      // timeupdate keeps heartbeats alive when Chrome is in the background (timers throttle).
+      sendHeartbeat(force);
+    };
+
     const handlers = {
-      timeupdate: updateVideoProgress,
-      play: updateVideoProgress,
-      pause: updateVideoProgress,
-      ended: updateVideoProgress,
+      timeupdate: () => onPlayState(false),
+      play: () => onPlayState(true),
+      pause: () => onPlayState(true),
+      ended: () => onPlayState(true),
       loadedmetadata: updateVideoProgress,
-      seeked: updateVideoProgress,
+      seeked: () => onPlayState(false),
     };
 
     Object.entries(handlers).forEach(([event, handler]) => {
@@ -106,6 +163,7 @@
   }
 
   function detectVideoPlayer() {
+    if (stopped) return;
     const url = window.location.href;
     if (!isWatchSite(url)) {
       removeVideoListeners();
@@ -129,19 +187,29 @@
     }
   }
 
+  function isVideoPlaying() {
+    return Boolean(videoProgress && !videoProgress.paused && !videoProgress.ended);
+  }
+
   function sendHeartbeat(force = false) {
+    if (stopped) return;
     const now = Date.now();
     updateShowInfo();
     updateVideoProgress();
 
     const recentlyActive = now - lastActivityTime < HEARTBEAT_INTERVAL * 1.5;
-    const playing =
-      videoProgress && !videoProgress.paused && !videoProgress.ended;
+    const playing = isVideoPlaying();
 
-    if (!isPageVisible || (!recentlyActive && !playing && !force)) return;
+    // Count while the video is playing even if Chrome is unfocused / another app is open.
+    // Only require page focus for non-playing idle activity.
+    if (!force && !playing && (!isPageVisible || !recentlyActive)) return;
     if (!force && now - lastHeartbeatTime < HEARTBEAT_INTERVAL) return;
 
     try {
+      if (!chrome.runtime?.id) {
+        globalThis.__ANIME_TRACKER_STOP__?.();
+        return;
+      }
       chrome.runtime.sendMessage(
         {
           type: 'ACTIVITY',
@@ -157,15 +225,22 @@
       lastHeartbeatTime = now;
     } catch (error) {
       console.debug('[Anime Tracker] heartbeat failed', error);
+      try {
+        globalThis.__ANIME_TRACKER_STOP__?.();
+      } catch {
+        /* ignore */
+      }
     }
   }
 
   function handleActivity() {
+    if (stopped) return;
     lastActivityTime = Date.now();
     sendHeartbeat();
   }
 
   function debouncedActivity() {
+    if (stopped) return;
     if (activityTimeout) clearTimeout(activityTimeout);
     activityTimeout = setTimeout(() => {
       handleActivity();
@@ -174,16 +249,22 @@
   }
 
   function onVisibility() {
+    if (stopped) return;
     isPageVisible = !document.hidden;
+    updateVideoProgress();
     if (isPageVisible) {
       lastActivityTime = Date.now();
       updateShowInfo(true);
       detectVideoPlayer();
       sendHeartbeat(true);
+    } else if (isVideoPlaying()) {
+      // Still playing while Chrome is in the background / another app is focused.
+      sendHeartbeat(true);
     }
   }
 
   function checkSpaNavigation() {
+    if (stopped) return;
     if (window.location.href === lastUrl) return;
     lastUrl = window.location.href;
     currentShowInfo = null;
@@ -196,41 +277,62 @@
   }
 
   function init() {
+    if (stopped) return;
+
     ['mousemove', 'scroll'].forEach((eventName) => {
-      document.addEventListener(eventName, debouncedActivity, { passive: true });
+      trackListener(document, eventName, debouncedActivity, { passive: true });
     });
     ['mousedown', 'click', 'keydown', 'touchstart'].forEach((eventName) => {
-      document.addEventListener(eventName, handleActivity, { passive: true });
+      trackListener(document, eventName, handleActivity, { passive: true });
     });
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', () => {
+    trackListener(document, 'visibilitychange', onVisibility);
+    trackListener(window, 'focus', () => {
       isPageVisible = true;
       handleActivity();
     });
-    window.addEventListener('blur', () => {
-      isPageVisible = false;
+    // Do not treat blur as "stop watching" — video may keep playing beside another app.
+    trackListener(window, 'blur', () => {
+      updateVideoProgress();
+      if (isVideoPlaying()) sendHeartbeat(true);
     });
 
-    const observer = new MutationObserver(() => {
-      if (!isWatchSite(window.location.href)) return;
+    observer = new MutationObserver(() => {
+      if (stopped || !isWatchSite(window.location.href)) return;
       detectVideoPlayer();
       if (!currentShowInfo) updateShowInfo(true);
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
-    setInterval(() => {
-      if (isPageVisible) sendHeartbeat();
+    const prevStop = globalThis.__ANIME_TRACKER_STOP__;
+    globalThis.__ANIME_TRACKER_STOP__ = () => {
+      if (observer) {
+        try {
+          observer.disconnect();
+        } catch {
+          /* ignore */
+        }
+        observer = null;
+      }
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
+        activityTimeout = null;
+      }
+      prevStop();
+    };
+
+    trackInterval(() => {
+      sendHeartbeat();
     }, HEARTBEAT_INTERVAL);
-    setInterval(() => {
-      if (isPageVisible) updateShowInfo();
+    trackInterval(() => {
+      if (isPageVisible || isVideoPlaying()) updateShowInfo();
     }, SHOW_INFO_UPDATE_INTERVAL);
-    setInterval(() => {
-      if (isPageVisible) detectVideoPlayer();
+    trackInterval(() => {
+      if (isPageVisible || isVideoPlaying()) detectVideoPlayer();
     }, VIDEO_DETECTION_INTERVAL);
-    setInterval(() => {
-      if (isPageVisible && currentVideoPlayer) updateVideoProgress();
+    trackInterval(() => {
+      if (currentVideoPlayer) updateVideoProgress();
     }, VIDEO_UPDATE_INTERVAL);
-    setInterval(checkSpaNavigation, 1000);
+    trackInterval(checkSpaNavigation, 1000);
 
     updateShowInfo(true);
     detectVideoPlayer();

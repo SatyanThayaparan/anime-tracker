@@ -57,6 +57,26 @@ If you already had an older build loaded, click **Reload** on the extension card
 └── vendor/            # Vendored Chart.js (no CDN)
 ```
 
+## Data across updates
+
+Chrome keeps `chrome.storage.local` when you **update or reload** the extension. History is only wiped if you uninstall the extension or use **Clear All Data**.
+
+On version/schema bumps, a migration runs automatically to repair messy show keys (for example merging `Haikyu!!E6Tempo` into `Haikyu!!` and dropping a bare `Netflix` “show”).
+
+## Version bumping
+
+`package.json` and `manifest.json` versions stay in sync via:
+
+```bash
+npm run version:patch   # 1.2.0 → 1.2.1
+npm run version:minor   # 1.2.0 → 1.3.0
+npm run version:major   # 1.2.0 → 2.0.0
+# or exact:
+node scripts/bump-version.mjs 1.4.0
+```
+
+Then reload the unpacked extension (or zip/publish for Store).
+
 ## Notes
 
 - Deeper design notes: [`DOCUMENTATION.md`](./DOCUMENTATION.md)

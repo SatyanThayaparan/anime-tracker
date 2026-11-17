@@ -1,8 +1,12 @@
 import { extractHostname } from './utils/categories.js';
 import { isWatchSite } from './utils/shows.js';
-import { getDateKey } from './utils/storage.js';
+import {
+  CURRENT_SCHEMA_VERSION,
+  getDateKey,
+  migrateWatchData,
+} from './utils/storage.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
 const ALARM_SAVE = 'anime-tracker-save';
 
 const CONFIG = {
@@ -14,6 +18,8 @@ const CONFIG = {
 let currentTracking = emptyTracking();
 let lastHeartbeatAt = null;
 let listenersBound = false;
+/** Tabs where content.js has been injected in this service-worker lifetime. */
+const contentReadyTabs = new Set();
 
 function emptyTracking() {
   return {
@@ -27,6 +33,7 @@ function emptyTracking() {
     startTime: null,
     lastActivityTime: null,
     isActive: false,
+    isPlaying: null,
     videoProgress: null,
   };
 }
@@ -34,13 +41,6 @@ function emptyTracking() {
 async function initializeStorage() {
   const data = await chrome.storage.local.get(['settings', 'meta']);
   const patch = {};
-
-  if (!data.meta) {
-    patch.meta = {
-      schemaVersion: SCHEMA_VERSION,
-      createdAt: new Date().toISOString(),
-    };
-  }
 
   if (!data.settings) {
     patch.settings = {
@@ -51,6 +51,83 @@ async function initializeStorage() {
 
   if (Object.keys(patch).length) {
     await chrome.storage.local.set(patch);
+  }
+
+  // Keep history across updates. Repair runs when schema bumps OR fragmented keys remain.
+  try {
+    const result = await migrateWatchData(SCHEMA_VERSION);
+    if (result.migrated) {
+      console.log(
+        `[Anime Tracker] Migrated storage to v${SCHEMA_VERSION}; fixed ${result.fixedShows} show keys`
+      );
+    } else if (!data.meta) {
+      await chrome.storage.local.set({
+        meta: {
+          schemaVersion: SCHEMA_VERSION,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
+  } catch (error) {
+    console.error('[Anime Tracker] migration failed', error);
+  }
+}
+
+async function injectIntoTab(tabId) {
+  // Tear down any dead content-script instance left after extension reload,
+  // then inject a fresh content.js so tracking resumes without a tab reload.
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        try {
+          if (typeof globalThis.__ANIME_TRACKER_STOP__ === 'function') {
+            globalThis.__ANIME_TRACKER_STOP__();
+          }
+        } catch {
+          /* ignore */
+        }
+        try {
+          delete globalThis.__ANIME_TRACKER_CONTENT__;
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+  } catch {
+    /* tab may not allow scripting yet */
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content.js'],
+  });
+  contentReadyTabs.add(tabId);
+}
+
+async function injectIntoOpenWatchTabs() {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [
+        '*://*.netflix.com/*',
+        '*://*.youtube.com/*',
+        '*://youtu.be/*',
+        '*://*.disneyplus.com/*',
+      ],
+    });
+
+    await Promise.all(
+      tabs.map(async (tab) => {
+        if (tab.id == null) return;
+        try {
+          await injectIntoTab(tab.id);
+        } catch (error) {
+          console.debug('[Anime Tracker] inject skipped', tab.id, error?.message);
+        }
+      })
+    );
+  } catch (error) {
+    console.error('[Anime Tracker] injectIntoOpenWatchTabs failed', error);
   }
 }
 
@@ -74,7 +151,8 @@ function ensureListeners() {
 
 async function startTracking() {
   ensureListeners();
-  await chrome.alarms.create(ALARM_SAVE, { periodInMinutes: 1 });
+  // Persist often so a Reload on chrome://extensions loses at most a few seconds.
+  await chrome.alarms.create(ALARM_SAVE, { periodInMinutes: 0.5 });
   await getCurrentTab();
 }
 
@@ -119,14 +197,32 @@ async function startTrackingTab(tabId, url) {
     startTime: now,
     lastActivityTime: now,
     isActive: true,
+    isPlaying: null,
     videoProgress: null,
   };
+}
+
+async function ensureContentOnWatchTab(tabId, url) {
+  if (tabId == null || !url || !isWatchSite(url)) return;
+  const hasRecentPulse =
+    currentTracking.tabId === tabId &&
+    lastHeartbeatAt &&
+    Date.now() - lastHeartbeatAt < 12_000;
+  if (contentReadyTabs.has(tabId) && hasRecentPulse) return;
+  try {
+    await injectIntoTab(tabId);
+  } catch (error) {
+    console.debug('[Anime Tracker] ensureContent skipped', tabId, error?.message);
+  }
 }
 
 async function handleTabActivated(activeInfo) {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    if (tab?.url) await startTrackingTab(tab.id, tab.url);
+    if (tab?.url) {
+      await startTrackingTab(tab.id, tab.url);
+      await ensureContentOnWatchTab(tab.id, tab.url);
+    }
   } catch (error) {
     console.error('[Anime Tracker] tab activate failed', error);
   }
@@ -134,23 +230,36 @@ async function handleTabActivated(activeInfo) {
 
 function handleTabUpdated(tabId, changeInfo, tab) {
   if (changeInfo.url && tabId === currentTracking.tabId) {
-    void startTrackingTab(tabId, changeInfo.url);
+    void startTrackingTab(tabId, changeInfo.url).then(() =>
+      ensureContentOnWatchTab(tabId, changeInfo.url)
+    );
   } else if (changeInfo.status === 'complete' && tab?.active && tab.url) {
-    void startTrackingTab(tabId, tab.url);
+    void startTrackingTab(tabId, tab.url).then(() => ensureContentOnWatchTab(tabId, tab.url));
   }
 }
 
 function handleTabRemoved(tabId) {
+  contentReadyTabs.delete(tabId);
   if (tabId !== currentTracking.tabId) return;
   void saveCurrentSession().then(() => {
     currentTracking = emptyTracking();
   });
 }
 
+function isTrackedVideoPlaying() {
+  const vp = currentTracking.videoProgress;
+  return Boolean(vp && !vp.paused && !vp.ended);
+}
+
 async function handleWindowFocusChanged(windowId) {
+  // Switching to another app must not pause watch time while video is playing.
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    currentTracking.isActive = false;
-    await saveCurrentSession();
+    if (isTrackedVideoPlaying()) {
+      currentTracking.isActive = true;
+      currentTracking.lastActivityTime = Date.now();
+      return;
+    }
+    // No play signal yet — keep session open; content heartbeats will update state.
     return;
   }
   currentTracking.isActive = true;
@@ -158,7 +267,19 @@ async function handleWindowFocusChanged(windowId) {
 }
 
 function handleIdleStateChange(state) {
-  if (state === 'idle' || state === 'locked') {
+  // Locked screen: definitely stop. Idle mouse while anime plays: keep counting.
+  if (state === 'locked') {
+    currentTracking.isActive = false;
+    void saveCurrentSession();
+    return;
+  }
+
+  if (state === 'idle') {
+    if (isTrackedVideoPlaying()) {
+      currentTracking.isActive = true;
+      currentTracking.lastActivityTime = Date.now();
+      return;
+    }
     currentTracking.isActive = false;
     void saveCurrentSession();
     return;
@@ -175,15 +296,28 @@ function handleMessage(message, sender, sendResponse) {
   if (message?.type === 'ACTIVITY') {
     lastHeartbeatAt = Date.now();
     const senderTabId = sender.tab?.id;
+    if (senderTabId != null) contentReadyTabs.add(senderTabId);
 
     if (senderTabId != null && currentTracking.tabId == null) {
       void startTrackingTab(senderTabId, message.url || sender.tab.url || '');
     }
 
     if (senderTabId != null && senderTabId === currentTracking.tabId) {
-      currentTracking.lastActivityTime = Date.now();
+      currentTracking.videoProgress = message.videoProgress || null;
+      if (message.url) currentTracking.url = message.url;
+
+      const playing = isTrackedVideoPlaying();
+      // Keep the session open while this tab is on a show; classify play vs pause on save.
+      const wasPlaying = currentTracking.isPlaying;
+      currentTracking.isPlaying = message.videoProgress != null ? playing : true;
       currentTracking.isActive = true;
+      currentTracking.lastActivityTime = Date.now();
       if (!currentTracking.startTime) currentTracking.startTime = Date.now();
+
+      // Flush when play/pause flips so focus ratio splits cleanly.
+      if (wasPlaying != null && wasPlaying !== currentTracking.isPlaying) {
+        void saveCurrentSession();
+      }
 
       if (message.showInfo?.showName) {
         const nextName = message.showInfo.showName;
@@ -207,8 +341,6 @@ function handleMessage(message, sender, sendResponse) {
         if (message.showInfo.site) currentTracking.platform = message.showInfo.site;
       }
 
-      currentTracking.videoProgress = message.videoProgress || null;
-      if (message.url) currentTracking.url = message.url;
     }
 
     sendResponse({ received: true });
@@ -264,6 +396,7 @@ async function saveCurrentSession() {
         platform: currentTracking.platform,
         totalTime: 0,
         activeTime: 0,
+        pausedTime: 0,
         episodes: {},
         sessions: 0,
         lastWatched: now,
@@ -272,8 +405,14 @@ async function saveCurrentSession() {
     }
 
     const showData = dayData.shows[currentTracking.showName];
+    const playing =
+      currentTracking.isPlaying != null
+        ? currentTracking.isPlaying
+        : isTrackedVideoPlaying();
+
     showData.totalTime += sessionDuration;
-    showData.activeTime += sessionDuration;
+    if (playing) showData.activeTime += sessionDuration;
+    else showData.pausedTime = (showData.pausedTime || 0) + sessionDuration;
     showData.lastWatched = now;
     showData.site = currentTracking.hostname;
     showData.platform = currentTracking.platform;
@@ -296,12 +435,14 @@ async function saveCurrentSession() {
           completed: false,
           timestamp: now,
           sessions: 0,
+          rewatches: 0,
           label: currentTracking.episodeLabel || episodeKey,
         };
       }
 
       const episodeData = showData.episodes[episodeKey];
-      episodeData.time += sessionDuration;
+      const wasCompleted = Boolean(episodeData.completed);
+      if (playing) episodeData.time += sessionDuration;
       episodeData.timestamp = now;
       if (currentTracking.episodeLabel) episodeData.label = currentTracking.episodeLabel;
 
@@ -314,6 +455,9 @@ async function saveCurrentSession() {
           if (vp.progress >= 0.8) episodeData.completed = true;
         }
       }
+
+      // Stash for session bump below (rewatch = new session on already-finished ep).
+      episodeData._wasCompletedAtSave = wasCompleted;
     }
 
     const visitKey = `${currentTracking.showName}_${currentTracking.hostname}`;
@@ -322,9 +466,15 @@ async function saveCurrentSession() {
       showData.sessions += 1;
       lastVisits[visitKey] = now;
       if (episodeKey && showData.episodes[episodeKey]) {
-        showData.episodes[episodeKey].sessions =
-          (showData.episodes[episodeKey].sessions || 0) + 1;
+        const episodeData = showData.episodes[episodeKey];
+        episodeData.sessions = (episodeData.sessions || 0) + 1;
+        if (episodeData._wasCompletedAtSave) {
+          episodeData.rewatches = (episodeData.rewatches || 0) + 1;
+        }
       }
+    }
+    if (episodeKey && showData.episodes[episodeKey]) {
+      delete showData.episodes[episodeKey]._wasCompletedAtSave;
     }
 
     dayData.dailyStats.totalTime += sessionDuration;
@@ -352,13 +502,17 @@ async function saveCurrentSession() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  void initializeStorage().then(startTracking);
+  void initializeStorage()
+    .then(startTracking)
+    .then(injectIntoOpenWatchTabs);
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void startTracking();
+  void startTracking().then(injectIntoOpenWatchTabs);
 });
 
-void initializeStorage().then(startTracking);
+void initializeStorage()
+  .then(startTracking)
+  .then(injectIntoOpenWatchTabs);
 
 export { currentTracking, CONFIG };

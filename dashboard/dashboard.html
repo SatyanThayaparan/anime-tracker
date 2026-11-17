@@ -12,7 +12,7 @@
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="logo">
-        <span class="logo-icon">📺</span>
+        <img class="logo-mark" src="../icons/icon48.png" width="28" height="28" alt="">
         <span class="logo-text">Anime Tracker</span>
       </div>
       
@@ -20,6 +20,10 @@
         <a href="#" class="nav-item active" data-tab="overview">
           <span class="nav-icon">📈</span>
           Overview
+        </a>
+        <a href="#" class="nav-item" data-tab="insights">
+          <span class="nav-icon">🍃</span>
+          Insights
         </a>
         <a href="#" class="nav-item" data-tab="shows">
           <span class="nav-icon">📺</span>
@@ -48,72 +52,84 @@
         </div>
       </header>
 
-      <!-- Overview Tab -->
-      <div id="overviewTab" class="tab-content active">
-        <!-- Stats Cards -->
+      <!-- Overview Tab — single-viewport layout -->
+      <div id="overviewTab" class="tab-content active overview-layout">
         <div class="stats-grid">
-          <div class="stat-card">
+          <div class="stat-card" data-stat="time" tabindex="0" role="button" aria-label="View time breakdown">
             <div class="stat-label">Total Time</div>
             <div class="stat-value" id="statTotalTime">0h 0m</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card" data-stat="episodes" tabindex="0" role="button" aria-label="View episode breakdown">
             <div class="stat-label">Episodes Watched</div>
             <div class="stat-value" id="statEpisodesWatched">0</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card" data-stat="shows" tabindex="0" role="button" aria-label="View active shows">
             <div class="stat-label">Shows Active</div>
             <div class="stat-value" id="statShowsCount">0</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card" data-stat="sessions" tabindex="0" role="button" aria-label="View session breakdown">
             <div class="stat-label">Viewing Sessions</div>
             <div class="stat-value" id="statSessionsCount">0</div>
           </div>
         </div>
 
-        <!-- Charts Row -->
         <div class="charts-row">
           <div class="chart-card">
             <h3>Time by Show</h3>
+            <p class="chart-hint">Click a slice for show details</p>
             <div class="chart-container">
               <canvas id="showChart"></canvas>
             </div>
           </div>
-          <div class="chart-card">
-            <h3>Hourly Activity</h3>
-            <div class="chart-container">
+          <div class="chart-card" id="activityChartCard">
+            <h3 id="activityChartTitle">Hourly Activity</h3>
+            <p class="chart-hint" id="activityChartHint">Click a bar to see what you watched</p>
+            <div class="chart-container" id="hourlyChartWrap">
               <canvas id="hourlyChart"></canvas>
+            </div>
+            <div class="chart-container" id="dailyChartWrap" hidden>
+              <canvas id="dailyChart"></canvas>
             </div>
           </div>
         </div>
 
-        <!-- Daily Trend Chart -->
-        <div class="chart-card full-width" id="dailyTrendCard" style="display: none;">
-          <h3>Daily Trend</h3>
-          <div class="chart-container">
-            <canvas id="dailyChart"></canvas>
+        <div class="table-card overview-table">
+          <h3>Top Shows <span class="chart-hint" style="display:inline;margin:0">· click a row</span></h3>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Show</th>
+                  <th>Site</th>
+                  <th>Time</th>
+                  <th>Episodes</th>
+                  <th>Sessions</th>
+                </tr>
+              </thead>
+              <tbody id="topShowsTable">
+                <tr>
+                  <td colspan="6" class="loading">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
+      </div>
 
-        <!-- Top Shows Table -->
-        <div class="table-card">
-          <h3>Top Shows</h3>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Show</th>
-                <th>Site</th>
-                <th>Time</th>
-                <th>Episodes</th>
-                <th>Sessions</th>
-              </tr>
-            </thead>
-            <tbody id="topShowsTable">
-              <tr>
-                <td colspan="6" class="loading">Loading...</td>
-              </tr>
-            </tbody>
-          </table>
+      <!-- Insights Tab -->
+      <div id="insightsTab" class="tab-content">
+        <div class="insights-grid" id="insightsGrid">
+          <p class="loading">Loading insights...</p>
+        </div>
+        <div class="insights-detail" id="insightsDetail" hidden>
+          <div class="table-card">
+            <div class="table-header">
+              <h3 id="insightsDetailTitle">Details</h3>
+              <button type="button" class="btn btn-secondary btn-sm" id="insightsDetailClose">Close</button>
+            </div>
+            <div id="insightsDetailBody"></div>
+          </div>
         </div>
       </div>
 
@@ -158,6 +174,46 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- Show detail drawer -->
+  <div id="detailOverlay" class="detail-overlay" hidden></div>
+  <aside id="detailDrawer" class="detail-drawer" aria-hidden="true">
+    <div class="detail-header">
+      <div>
+        <p class="detail-kicker">Show details</p>
+        <h2 id="detailTitle">—</h2>
+      </div>
+      <button type="button" class="detail-close" id="detailClose" aria-label="Close details">×</button>
+    </div>
+    <div class="detail-meta" id="detailMeta"></div>
+    <div class="detail-stats" id="detailStats"></div>
+    <div class="detail-section">
+      <h3>Genre / tags</h3>
+      <div class="tag-editor" id="detailTags"></div>
+      <form class="tag-form" id="detailTagForm">
+        <input type="text" id="detailTagInput" class="search-input" list="tagSuggestions" placeholder="Add tag (e.g. sports)" autocomplete="off">
+        <button type="submit" class="btn btn-secondary btn-sm">Add</button>
+      </form>
+      <datalist id="tagSuggestions"></datalist>
+    </div>
+    <div class="detail-section">
+      <h3>Episodes</h3>
+      <div class="detail-list" id="detailEpisodes"></div>
+    </div>
+    <div class="detail-section">
+      <h3>Watch hours</h3>
+      <div class="detail-hours" id="detailHours"></div>
+    </div>
+  </aside>
+
+  <!-- Hour / day peek -->
+  <div id="peekCard" class="peek-card" hidden>
+    <button type="button" class="peek-close" id="peekClose" aria-label="Close">×</button>
+    <p class="peek-kicker" id="peekKicker">Activity</p>
+    <h3 id="peekTitle">—</h3>
+    <p class="peek-value" id="peekValue">—</p>
+    <ul class="peek-list" id="peekList"></ul>
   </div>
 
   <script src="dashboard.js" type="module"></script>

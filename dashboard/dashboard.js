@@ -1,29 +1,40 @@
 import { 
   getAggregatedData, 
-  getTodayData, 
+  getDataForDate,
+  getDataForDates,
+  getDateRange,
   getTopShows, 
   getTotalTime, 
   formatTime,
-  getSettings,
-  saveSettings,
   exportData,
   clearAllData,
-  calculatePercentage,
-  getCompletedEpisodes
+  getCompletedEpisodes,
+  getShowTags,
+  setShowTags,
 } from '../utils/storage.js';
+import {
+  SUGGESTED_TAGS,
+  computeInsights,
+  dailyTotalsFromRaw,
+} from '../utils/metrics.js';
 
 // State
 let currentRange = 1;
 let currentData = null;
+let currentInsights = null;
+let showTags = {};
+let activeDetailShow = null;
 let showChart = null;
 let hourlyChart = null;
 let dailyChart = null;
+let platformChart = null;
 
 /**
  * Initialize dashboard
  */
 async function initDashboard() {
   setupEventListeners();
+  window.addEventListener('resize', resizeVisibleCharts);
   await loadData();
 }
 
@@ -62,6 +73,48 @@ function setupEventListeners() {
 
   // Clear data button
   document.getElementById('clearDataBtn').addEventListener('click', handleClearData);
+
+  document.getElementById('detailClose')?.addEventListener('click', closeShowDetail);
+  document.getElementById('detailOverlay')?.addEventListener('click', closeShowDetail);
+  document.getElementById('peekClose')?.addEventListener('click', closePeek);
+
+  document.querySelectorAll('.stat-card[data-stat]').forEach((card) => {
+    const open = () => openStatPeek(card.dataset.stat);
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeShowDetail();
+      closePeek();
+      closeInsightsDetail();
+    }
+  });
+
+  document.getElementById('insightsDetailClose')?.addEventListener('click', closeInsightsDetail);
+
+  document.getElementById('detailTagForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('detailTagInput');
+    const value = input?.value?.trim();
+    if (!value || !activeDetailShow) return;
+    const next = [...(showTags[activeDetailShow] || []), value];
+    showTags = await setShowTags(activeDetailShow, next);
+    input.value = '';
+    renderDetailTags(activeDetailShow);
+    renderInsights();
+  });
+
+  const datalist = document.getElementById('tagSuggestions');
+  if (datalist) {
+    datalist.innerHTML = SUGGESTED_TAGS.map((tag) => `<option value="${tag}"></option>`).join('');
+  }
 }
 
 /**
@@ -82,10 +135,12 @@ function switchTab(tabId) {
   // Update page title
   const titles = {
     overview: 'Overview',
+    insights: 'Insights',
     shows: 'All Shows',
     settings: 'Settings'
   };
   document.getElementById('pageTitle').textContent = titles[tabId] || 'Dashboard';
+  if (tabId === 'insights') renderInsights();
 }
 
 /**
@@ -94,21 +149,37 @@ function switchTab(tabId) {
 async function loadData() {
   try {
     currentData = await getAggregatedData(currentRange);
+    showTags = await getShowTags();
+    const streakRaw = await getDataForDates(getDateRange(90));
+    currentInsights = computeInsights(currentData, {
+      showTags,
+      streakDaily: dailyTotalsFromRaw(streakRaw, 90),
+    });
+
     updateStats();
     updateCharts();
     updateTopShowsTable();
     updateAllShowsTable();
+    renderInsights();
     
-    // Show/hide daily trend chart based on range
-    const dailyCard = document.getElementById('dailyTrendCard');
-    if (dailyCard) {
-      if (currentRange > 1) {
-        dailyCard.style.display = 'block';
-        updateDailyChart();
-      } else {
-        dailyCard.style.display = 'none';
-      }
+    // Same chart slot: hourly for today, daily trend for multi-day (keeps one page).
+    const title = document.getElementById('activityChartTitle');
+    const hourlyWrap = document.getElementById('hourlyChartWrap');
+    const dailyWrap = document.getElementById('dailyChartWrap');
+    const activityHint = document.getElementById('activityChartHint');
+    if (currentRange > 1) {
+      if (title) title.textContent = 'Daily Trend';
+      if (activityHint) activityHint.textContent = 'Click a day to see shows watched';
+      if (hourlyWrap) hourlyWrap.hidden = true;
+      if (dailyWrap) dailyWrap.hidden = false;
+      updateDailyChart();
+    } else {
+      if (title) title.textContent = 'Hourly Activity';
+      if (activityHint) activityHint.textContent = 'Click a bar to see what you watched';
+      if (hourlyWrap) hourlyWrap.hidden = false;
+      if (dailyWrap) dailyWrap.hidden = true;
     }
+    resizeVisibleCharts();
   } catch (error) {
     console.error('Error loading data:', error);
   }
@@ -135,7 +206,27 @@ function updateStats() {
  */
 function updateCharts() {
   updateShowChart();
-  updateHourlyChart();
+  if (currentRange <= 1) updateHourlyChart();
+}
+
+function resizeVisibleCharts() {
+  requestAnimationFrame(() => {
+    try {
+      showChart?.resize();
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (!document.getElementById('hourlyChartWrap')?.hidden) hourlyChart?.resize();
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (!document.getElementById('dailyChartWrap')?.hidden) dailyChart?.resize();
+    } catch {
+      /* ignore */
+    }
+  });
 }
 
 /**
@@ -154,47 +245,54 @@ function updateShowChart() {
   
   // Generate colors for shows
   const colors = [
-    '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
-    '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'
+    '#c04028', '#3f5f4e', '#8b6f55', '#5a8f9c', '#d9783a',
+    '#3f7a5c', '#a67c52', '#6b8f71', '#c49a6c', '#7aa0ad'
   ];
 
   if (showChart) {
     showChart.destroy();
   }
 
-  if (shows.length === 0) {
-    ctx.canvas.parentElement.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">📺</div>
-        <p>No shows watched in this period</p>
-      </div>
-    `;
-    return;
-  }
+  const empty = shows.length === 0;
 
   showChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels,
+      labels: empty ? ['No data'] : labels,
       datasets: [{
-        data,
-        backgroundColor: colors.slice(0, shows.length),
+        data: empty ? [1] : data,
+        backgroundColor: empty ? ['rgba(63, 95, 78, 0.12)'] : colors.slice(0, shows.length),
         borderWidth: 0
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (_event, elements) => {
+        if (empty || !elements?.length) return;
+        const idx = elements[0].index;
+        const name = labels[idx];
+        if (name) openShowDetail(name);
+      },
       plugins: {
         legend: {
+          display: !empty,
           position: 'right',
           labels: {
-            padding: 16,
+            padding: 12,
             usePointStyle: true,
-            pointStyle: 'circle'
+            pointStyle: 'circle',
+            color: '#5a6b61',
+            font: { size: 11 }
+          },
+          onClick: (_e, legendItem) => {
+            if (empty) return;
+            const name = labels[legendItem.index];
+            if (name) openShowDetail(name);
           }
         },
         tooltip: {
+          enabled: !empty,
           callbacks: {
             label: (context) => {
               const time = formatTime(context.raw, true);
@@ -235,13 +333,17 @@ function updateHourlyChart() {
       datasets: [{
         label: 'Minutes',
         data,
-        backgroundColor: '#3b82f6',
-        borderRadius: 4
+        backgroundColor: 'rgba(63, 95, 78, 0.88)',
+        borderRadius: 5
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (_event, elements) => {
+        if (!elements?.length) return;
+        openHourPeek(elements[0].index);
+      },
       plugins: {
         legend: {
           display: false
@@ -262,11 +364,14 @@ function updateHourlyChart() {
         x: {
           grid: {
             display: false
-          }
+          },
+          ticks: { color: '#7a8a80' }
         },
         y: {
           beginAtZero: true,
+          grid: { color: 'rgba(79, 107, 92, 0.1)' },
           ticks: {
+            color: '#7a8a80',
             callback: (value) => {
               if (value >= 60) {
                 return `${Math.floor(value / 60)}h`;
@@ -304,15 +409,22 @@ function updateDailyChart() {
       datasets: [{
         label: 'Hours',
         data,
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        borderColor: '#c04028',
+        backgroundColor: 'rgba(63, 95, 78, 0.14)',
         fill: true,
-        tension: 0.4
+        tension: 0.4,
+        pointBackgroundColor: '#c04028',
+        pointBorderColor: '#fffcf7',
+        pointRadius: 3
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (_event, elements) => {
+        if (!elements?.length) return;
+        openDayPeek(sortedDays[elements[0].index]);
+      },
       plugins: {
         legend: {
           display: false
@@ -332,11 +444,14 @@ function updateDailyChart() {
         x: {
           grid: {
             display: false
-          }
+          },
+          ticks: { color: '#7a8a80' }
         },
         y: {
           beginAtZero: true,
+          grid: { color: 'rgba(79, 107, 92, 0.1)' },
           ticks: {
+            color: '#7a8a80',
             callback: (value) => `${value}h`
           }
         }
@@ -366,18 +481,19 @@ function updateTopShowsTable() {
 
   tbody.innerHTML = topShows.map((show, index) => {
     const episodesCompleted = getCompletedEpisodes(show.episodes);
+    const safeName = escapeHtml(show.showName);
 
     return `
-      <tr>
+      <tr data-showname="${safeName}" tabindex="0" role="button" aria-label="Open details for ${safeName}">
         <td>${index + 1}</td>
         <td>
           <div class="site-cell">
-            <span class="site-name">${show.showName}</span>
+            <span class="site-name">${safeName}</span>
           </div>
         </td>
         <td>
           <span class="category-badge">
-            ${show.site || 'Unknown'}
+            ${escapeHtml(show.site || show.platform || 'Unknown')}
           </span>
         </td>
         <td>${formatTime(show.totalTime, true)}</td>
@@ -386,6 +502,8 @@ function updateTopShowsTable() {
       </tr>
     `;
   }).join('');
+
+  bindShowRowClicks(tbody);
 }
 
 /**
@@ -411,17 +529,18 @@ function updateAllShowsTable() {
 
   tbody.innerHTML = shows.map(show => {
     const episodesCompleted = getCompletedEpisodes(show.episodes);
+    const safeName = escapeHtml(show.showName);
 
     return `
-      <tr data-showname="${show.showName}">
+      <tr data-showname="${safeName}" tabindex="0" role="button" aria-label="Open details for ${safeName}">
         <td>
           <div class="site-cell">
-            <span class="site-name">${show.showName}</span>
+            <span class="site-name">${safeName}</span>
           </div>
         </td>
         <td>
           <span class="category-badge">
-            ${show.site || 'Unknown'}
+            ${escapeHtml(show.site || show.platform || 'Unknown')}
           </span>
         </td>
         <td>${formatTime(show.totalTime, true)}</td>
@@ -430,6 +549,8 @@ function updateAllShowsTable() {
       </tr>
     `;
   }).join('');
+
+  bindShowRowClicks(tbody);
 }
 
 /**
@@ -445,6 +566,560 @@ function filterShows(searchTerm) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function bindShowRowClicks(tbody) {
+  tbody.querySelectorAll('tr[data-showname]').forEach((row) => {
+    const open = () => openShowDetail(row.dataset.showname);
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+  });
+}
+
+function renderInsights() {
+  const grid = document.getElementById('insightsGrid');
+  if (!grid || !currentInsights) return;
+
+  const cards = [
+    { key: 'completionRate', title: 'Completion rate' },
+    { key: 'bingeScore', title: 'Binge score' },
+    { key: 'streaks', title: 'Streaks' },
+    { key: 'platformSplit', title: 'Platform split' },
+    { key: 'primeHours', title: 'Prime hours' },
+    { key: 'resumeDebt', title: 'Resume debt' },
+    { key: 'pace', title: 'Pace vs runtime' },
+    { key: 'genreTags', title: 'Genre / tags' },
+    { key: 'rewatch', title: 'Rewatches' },
+    { key: 'focusRatio', title: 'Focus ratio' },
+  ];
+
+  grid.innerHTML = cards
+    .map(({ key, title }) => {
+      const metric = currentInsights[key];
+      return `
+        <button type="button" class="insight-card" data-insight="${key}">
+          <span class="insight-label">${title}</span>
+          <span class="insight-value">${escapeHtml(metric.label)}</span>
+          <span class="insight-detail">${escapeHtml(metric.detail)}</span>
+        </button>
+      `;
+    })
+    .join('');
+
+  grid.querySelectorAll('.insight-card').forEach((card) => {
+    card.addEventListener('click', () => openInsightDetail(card.dataset.insight));
+  });
+}
+
+function closeInsightsDetail() {
+  const panel = document.getElementById('insightsDetail');
+  if (panel) panel.hidden = true;
+  document.querySelectorAll('.insight-card.active').forEach((c) => c.classList.remove('active'));
+}
+
+function openInsightDetail(key) {
+  const metric = currentInsights?.[key];
+  const panel = document.getElementById('insightsDetail');
+  const title = document.getElementById('insightsDetailTitle');
+  const body = document.getElementById('insightsDetailBody');
+  if (!metric || !panel || !body) return;
+
+  document.querySelectorAll('.insight-card').forEach((card) => {
+    card.classList.toggle('active', card.dataset.insight === key);
+  });
+
+  const titles = {
+    completionRate: 'Completion rate',
+    bingeScore: 'Binge score',
+    streaks: 'Watch streaks',
+    platformSplit: 'Platform split',
+    primeHours: 'Prime hours',
+    resumeDebt: 'Resume debt',
+    pace: 'Pace vs runtime',
+    genreTags: 'Genre / tags',
+    rewatch: 'Rewatches',
+    focusRatio: 'Focus ratio',
+  };
+  title.textContent = titles[key] || 'Insight';
+
+  if (key === 'platformSplit') {
+    body.innerHTML = `
+      <div class="chart-container" style="height:220px;margin-bottom:12px">
+        <canvas id="platformChart"></canvas>
+      </div>
+      <div class="insight-bars">
+        ${metric.items
+          .map(
+            (item) => `
+          <div class="insight-bar-row">
+            <span>${escapeHtml(item.label)}</span>
+            <div class="insight-bar-track"><i style="width:${item.pct}%"></i></div>
+            <strong>${item.pct}% · ${formatTime(item.ms, true)}</strong>
+          </div>`
+          )
+          .join('')}
+      </div>
+    `;
+    requestAnimationFrame(() => renderPlatformChart(metric.items));
+  } else if (key === 'resumeDebt') {
+    body.innerHTML = metric.items?.length
+      ? `<div class="detail-list">${metric.items
+          .map(
+            (item) => `
+        <div class="detail-episode">
+          <button type="button" class="ep-name" data-show="${escapeHtml(item.showName)}" style="border:none;background:none;padding:0;cursor:pointer;text-align:left;font:inherit;font-weight:700;color:var(--forest)">${escapeHtml(item.showName)} · ${escapeHtml(item.label)}</button>
+          <span class="ep-time">${item.progress}%</span>
+          <span class="ep-sub">${formatTime(item.time, true)} watched${item.remainingMs ? ` · ~${formatTime(item.remainingMs, true)} left` : ''}</span>
+          <div class="ep-bar"><i style="width:${item.progress}%"></i></div>
+        </div>`
+          )
+          .join('')}</div>`
+      : `<p class="empty-state">You're caught up — no unfinished episodes in this range.</p>`;
+  } else if (key === 'rewatch') {
+    body.innerHTML = metric.items?.length
+      ? `<div class="detail-list">${metric.items
+          .map(
+            (item) => `
+        <div class="detail-episode">
+          <button type="button" class="ep-name" data-show="${escapeHtml(item.showName)}" style="border:none;background:none;padding:0;cursor:pointer;text-align:left;font:inherit;font-weight:700;color:var(--forest)">${escapeHtml(item.showName)} · ${escapeHtml(item.label)}</button>
+          <span class="ep-time">${item.rewatches || 0} rewatch</span>
+          <span class="ep-sub">${item.sessions} sessions on this episode</span>
+        </div>`
+          )
+          .join('')}</div>`
+      : `<p class="empty-state">No rewatches logged yet.</p>`;
+  } else if (key === 'genreTags') {
+    body.innerHTML = `
+      <p style="margin-bottom:10px;color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
+      <div class="insight-bars">
+        ${
+          metric.items?.length
+            ? metric.items
+                .map(
+                  (item) => `
+          <div class="insight-bar-row">
+            <span>${escapeHtml(item.tag)}</span>
+            <div class="insight-bar-track"><i style="width:${Math.max(8, Math.round((item.ms / (metric.items[0].ms || 1)) * 100))}%"></i></div>
+            <strong>${item.shows} shows · ${formatTime(item.ms, true)}</strong>
+          </div>`
+                )
+                .join('')
+            : `<p class="empty-state">Open a show and add tags to build your taste map.</p>`
+        }
+      </div>
+    `;
+  } else if (key === 'primeHours') {
+    body.innerHTML = `
+      <div class="detail-stats">
+        <div class="detail-stat"><span>Peak hour</span><strong>${escapeHtml(metric.peakLabel)}</strong></div>
+        <div class="detail-stat"><span>Peak time</span><strong>${formatTime(metric.peakMs, true)}</strong></div>
+        <div class="detail-stat"><span>Best 3h window</span><strong>${escapeHtml(metric.windowLabel)}</strong></div>
+        <div class="detail-stat"><span>Window time</span><strong>${formatTime(metric.windowMs, true)}</strong></div>
+      </div>
+      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
+    `;
+  } else if (key === 'streaks') {
+    body.innerHTML = `
+      <div class="detail-stats">
+        <div class="detail-stat"><span>Current streak</span><strong>${metric.current}</strong></div>
+        <div class="detail-stat"><span>Best streak</span><strong>${metric.best}</strong></div>
+        <div class="detail-stat"><span>Last active</span><strong>${escapeHtml(metric.lastActive || '—')}</strong></div>
+      </div>
+      <p style="color:var(--text-secondary)">Streaks use any day with watch time in the last 90 days.</p>
+    `;
+  } else if (key === 'bingeScore') {
+    body.innerHTML = `
+      <div class="detail-stats">
+        <div class="detail-stat"><span>Minutes / session</span><strong>${metric.minutesPerSession}</strong></div>
+        <div class="detail-stat"><span>Finished eps / session</span><strong>${metric.episodesPerSession}</strong></div>
+      </div>
+      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
+    `;
+  } else if (key === 'completionRate') {
+    body.innerHTML = `
+      <div class="detail-stats">
+        <div class="detail-stat"><span>Completion</span><strong>${metric.value}%</strong></div>
+        <div class="detail-stat"><span>Finished</span><strong>${metric.completed}</strong></div>
+        <div class="detail-stat"><span>Started</span><strong>${metric.started}</strong></div>
+      </div>
+      <p style="color:var(--text-secondary)">Finished means ≥80% progress or marked complete.</p>
+    `;
+  } else if (key === 'pace') {
+    body.innerHTML = `
+      <div class="detail-stats">
+        <div class="detail-stat"><span>Pace</span><strong>${metric.pct != null ? `${metric.pct}%` : '—'}</strong></div>
+        <div class="detail-stat"><span>Watched</span><strong>${formatTime(metric.watchedMs, true)}</strong></div>
+        <div class="detail-stat"><span>Runtime</span><strong>${formatTime(metric.runtimeMs, true)}</strong></div>
+      </div>
+      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
+    `;
+  } else if (key === 'focusRatio') {
+    body.innerHTML = `
+      <div class="detail-stats">
+        <div class="detail-stat"><span>Focus</span><strong>${metric.pct != null ? `${metric.pct}%` : '—'}</strong></div>
+        <div class="detail-stat"><span>Playing</span><strong>${formatTime(metric.activeTime, true)}</strong></div>
+        <div class="detail-stat"><span>Paused</span><strong>${formatTime(metric.pausedTime, true)}</strong></div>
+      </div>
+      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
+    `;
+  } else {
+    body.innerHTML = `<p>${escapeHtml(metric.detail)}</p>`;
+  }
+
+  body.querySelectorAll('button[data-show]').forEach((btn) => {
+    btn.addEventListener('click', () => openShowDetail(btn.dataset.show));
+  });
+
+  panel.hidden = false;
+}
+
+function renderPlatformChart(items = []) {
+  const canvas = document.getElementById('platformChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (platformChart) platformChart.destroy();
+  platformChart = new Chart(canvas.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: items.map((i) => i.label),
+      datasets: [
+        {
+          data: items.map((i) => i.ms),
+          backgroundColor: ['#c04028', '#3f5f4e', '#8b6f55', '#5a8f9c'],
+          borderWidth: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#5a6b61', usePointStyle: true, pointStyle: 'circle' },
+        },
+      },
+    },
+  });
+}
+
+function renderDetailTags(showName) {
+  const wrap = document.getElementById('detailTags');
+  if (!wrap) return;
+  const tags = showTags[showName] || [];
+  wrap.innerHTML = tags.length
+    ? tags
+        .map(
+          (tag) => `
+      <span class="tag-chip">
+        ${escapeHtml(tag)}
+        <button type="button" data-remove-tag="${escapeHtml(tag)}" aria-label="Remove ${escapeHtml(tag)}">×</button>
+      </span>`
+        )
+        .join('')
+    : `<span style="color:var(--text-secondary);font-size:12px">No tags yet</span>`;
+
+  wrap.querySelectorAll('button[data-remove-tag]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const next = (showTags[showName] || []).filter((tag) => tag !== btn.dataset.removeTag);
+      showTags = await setShowTags(showName, next);
+      renderDetailTags(showName);
+      renderInsights();
+    });
+  });
+
+  const suggestions = document.createElement('div');
+  suggestions.className = 'tag-suggestions';
+  suggestions.innerHTML = SUGGESTED_TAGS.filter((tag) => !tags.includes(tag))
+    .slice(0, 6)
+    .map((tag) => `<button type="button" data-add-tag="${tag}">${tag}</button>`)
+    .join('');
+  wrap.appendChild(suggestions);
+  suggestions.querySelectorAll('button[data-add-tag]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const next = [...(showTags[showName] || []), btn.dataset.addTag];
+      showTags = await setShowTags(showName, next);
+      renderDetailTags(showName);
+      renderInsights();
+    });
+  });
+}
+
+function openShowDetail(showName) {
+  const show = currentData?.shows?.[showName];
+  if (!show) return;
+
+  activeDetailShow = showName;
+
+  document.querySelectorAll('tr[data-showname]').forEach((row) => {
+    row.classList.toggle('selected', row.dataset.showname === showName);
+  });
+
+  const overlay = document.getElementById('detailOverlay');
+  const drawer = document.getElementById('detailDrawer');
+  document.getElementById('detailTitle').textContent = showName;
+
+  const site = show.site || show.platform || 'Unknown';
+  const completed = getCompletedEpisodes(show.episodes);
+  const episodeCount = Object.keys(show.episodes || {}).length;
+  document.getElementById('detailMeta').innerHTML = `
+    <span class="detail-chip">${escapeHtml(site)}</span>
+    <span class="detail-chip accent">${completed}/${episodeCount || 0} episodes done</span>
+  `;
+
+  const avgSession =
+    show.sessions > 0 ? show.totalTime / show.sessions : show.totalTime;
+  document.getElementById('detailStats').innerHTML = `
+    <div class="detail-stat"><span>Total time</span><strong>${formatTime(show.totalTime, true)}</strong></div>
+    <div class="detail-stat"><span>Sessions</span><strong>${show.sessions || 0}</strong></div>
+    <div class="detail-stat"><span>Avg session</span><strong>${formatTime(avgSession, true)}</strong></div>
+    <div class="detail-stat"><span>Last watched</span><strong>${
+      show.lastWatched
+        ? new Date(show.lastWatched).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+          })
+        : '—'
+    }</strong></div>
+  `;
+
+  const episodes = Object.entries(show.episodes || {})
+    .map(([key, ep]) => ({ key, ...ep }))
+    .sort((a, b) => (b.time || 0) - (a.time || 0));
+
+  const epEl = document.getElementById('detailEpisodes');
+  if (!episodes.length) {
+    epEl.innerHTML = `<p class="empty-state">No episode breakdown yet — keep watching and it will fill in.</p>`;
+  } else {
+    epEl.innerHTML = episodes
+      .map((ep) => {
+        const progress = Math.min(100, Math.round((ep.progress || 0) * 100));
+        const label = ep.label || `Episode ${ep.key}`;
+        return `
+          <div class="detail-episode">
+            <span class="ep-name">${escapeHtml(label)}</span>
+            <span class="ep-time">${formatTime(ep.time || 0, true)}</span>
+            <span class="ep-sub">${progress}% watched · ${ep.sessions || 0} sessions${
+              ep.completed ? ' · completed' : ''
+            }</span>
+            <div class="ep-bar"><i style="width:${progress}%"></i></div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  const hourly = show.hourly || {};
+  const maxHour = Math.max(1, ...Object.values(hourly).map((v) => v || 0));
+  const hoursEl = document.getElementById('detailHours');
+  hoursEl.innerHTML = Array.from({ length: 24 }, (_, i) => {
+    const key = String(i).padStart(2, '0');
+    const ms = hourly[key] || 0;
+    const pct = Math.max(ms > 0 ? 8 : 2, Math.round((ms / maxHour) * 100));
+    return `
+      <div class="detail-hour" title="${key}:00 · ${formatTime(ms, true)}">
+        <div class="bar" style="height:${pct}%"></div>
+        <span class="lbl">${i % 3 === 0 ? i : ''}</span>
+      </div>
+    `;
+  }).join('');
+
+  renderDetailTags(showName);
+
+  overlay.hidden = false;
+  drawer.classList.add('open');
+  drawer.setAttribute('aria-hidden', 'false');
+  closePeek();
+}
+
+function closeShowDetail() {
+  const overlay = document.getElementById('detailOverlay');
+  const drawer = document.getElementById('detailDrawer');
+  if (overlay) overlay.hidden = true;
+  if (drawer) {
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+  }
+  activeDetailShow = null;
+  document.querySelectorAll('tr[data-showname].selected').forEach((row) => {
+    row.classList.remove('selected');
+  });
+}
+
+function showPeek({ kicker, title, value, items }) {
+  const card = document.getElementById('peekCard');
+  document.getElementById('peekKicker').textContent = kicker;
+  document.getElementById('peekTitle').textContent = title;
+  document.getElementById('peekValue').textContent = value;
+  const list = document.getElementById('peekList');
+  list.innerHTML = (items || [])
+    .map(
+      (item) => `
+      <li>
+        ${
+          item.showName
+            ? `<button type="button" data-show="${escapeHtml(item.showName)}">${escapeHtml(
+                item.label
+              )}</button>`
+            : `<span>${escapeHtml(item.label)}</span>`
+        }
+        <span>${escapeHtml(item.meta)}</span>
+      </li>`
+    )
+    .join('') || `<li><span>No details for this slice</span><span></span></li>`;
+
+  list.querySelectorAll('button[data-show]').forEach((btn) => {
+    btn.addEventListener('click', () => openShowDetail(btn.dataset.show));
+  });
+
+  card.hidden = false;
+}
+
+function closePeek() {
+  const card = document.getElementById('peekCard');
+  if (card) card.hidden = true;
+  document.querySelectorAll('.stat-card.active-filter').forEach((c) => {
+    c.classList.remove('active-filter');
+  });
+}
+
+function openHourPeek(hourIndex) {
+  const hour = String(hourIndex).padStart(2, '0');
+  const total = currentData?.hourly?.[hour] || 0;
+  const items = Object.entries(currentData?.shows || {})
+    .map(([name, show]) => ({
+      showName: name,
+      label: name,
+      meta: formatTime(show.hourly?.[hour] || 0, true),
+      ms: show.hourly?.[hour] || 0,
+    }))
+    .filter((item) => item.ms > 0)
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, 6);
+
+  showPeek({
+    kicker: 'Hourly slice',
+    title: `${hourIndex}:00 – ${hourIndex}:59`,
+    value: formatTime(total, true),
+    items,
+  });
+}
+
+async function openDayPeek(dateKey) {
+  if (!dateKey) return;
+  const day = await getDataForDate(dateKey);
+  const shows = Object.entries(day.shows || {})
+    .map(([name, show]) => ({
+      showName: name,
+      label: name,
+      meta: formatTime(show.totalTime || 0, true),
+      ms: show.totalTime || 0,
+    }))
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, 8);
+
+  const total = shows.reduce((sum, s) => sum + s.ms, 0);
+  const label = new Date(`${dateKey}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+
+  showPeek({
+    kicker: 'Day slice',
+    title: label,
+    value: formatTime(total, true),
+    items: shows,
+  });
+}
+
+function openStatPeek(stat) {
+  document.querySelectorAll('.stat-card[data-stat]').forEach((card) => {
+    card.classList.toggle('active-filter', card.dataset.stat === stat);
+  });
+
+  const shows = Object.entries(currentData?.shows || {})
+    .map(([name, show]) => ({ name, ...show }))
+    .sort((a, b) => (b.totalTime || 0) - (a.totalTime || 0));
+
+  if (stat === 'time') {
+    showPeek({
+      kicker: 'Total time',
+      title: 'Where time went',
+      value: formatTime(currentData?.stats?.totalTime || getTotalTime(currentData?.shows || {}), true),
+      items: shows.slice(0, 6).map((s) => ({
+        showName: s.name,
+        label: s.name,
+        meta: formatTime(s.totalTime || 0, true),
+      })),
+    });
+    return;
+  }
+
+  if (stat === 'episodes') {
+    const items = shows
+      .map((s) => ({
+        showName: s.name,
+        label: s.name,
+        meta: `${getCompletedEpisodes(s.episodes)} done`,
+        count: getCompletedEpisodes(s.episodes),
+      }))
+      .filter((s) => s.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+    showPeek({
+      kicker: 'Episodes',
+      title: 'Completed episodes',
+      value: String(currentData?.stats?.episodesWatched || 0),
+      items,
+    });
+    return;
+  }
+
+  if (stat === 'shows') {
+    showPeek({
+      kicker: 'Shows',
+      title: 'Active in this range',
+      value: String(shows.length),
+      items: shows.slice(0, 8).map((s) => ({
+        showName: s.name,
+        label: s.name,
+        meta: formatTime(s.totalTime || 0, true),
+      })),
+    });
+    return;
+  }
+
+  if (stat === 'sessions') {
+    const items = shows
+      .map((s) => ({
+        showName: s.name,
+        label: s.name,
+        meta: `${s.sessions || 0} sessions`,
+        count: s.sessions || 0,
+      }))
+      .filter((s) => s.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+    const total = shows.reduce((sum, s) => sum + (s.sessions || 0), 0);
+    showPeek({
+      kicker: 'Sessions',
+      title: 'Viewing sessions',
+      value: String(total),
+      items,
+    });
+  }
+}
 
 /**
  * Handle export data
