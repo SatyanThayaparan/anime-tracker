@@ -129,7 +129,7 @@ function displayCurrentWatching(tracking) {
       <div class="show-layout">
         ${
           posterUrl
-            ? `<img class="show-poster" src="${escapeHtml(posterUrl)}" alt="" width="72" height="102">`
+            ? `<img class="show-poster" src="${escapeHtml(posterUrl)}" alt="" width="72" height="102" referrerpolicy="no-referrer">`
             : `<div class="show-poster placeholder" aria-hidden="true">📺</div>`
         }
         <div class="show-header">
@@ -146,7 +146,28 @@ function displayCurrentWatching(tracking) {
   `;
 
   bindAnimeActions(container, tracking.showName, anime);
-}
+
+  // If we have a confident match but no poster yet, force a refresh once.
+  if (confident && anime?.match && !posterUrl) {
+    chrome.runtime.sendMessage(
+      { type: 'VERIFY_ANIME', showName: tracking.showName, force: true },
+      () => {
+        void chrome.runtime.lastError;
+      }
+    );
+  }
+
+  const posterImg = container.querySelector('img.show-poster');
+  if (posterImg) {
+    posterImg.addEventListener('error', () => {
+      posterImg.replaceWith(
+        Object.assign(document.createElement('div'), {
+          className: 'show-poster placeholder',
+          textContent: '📺',
+        })
+      );
+    });
+  }
 
 function renderSeasonProgress(progress, seasonNum) {
   if (!progress) {

@@ -1188,3 +1188,41 @@ body {
   gap: 8px;
   margin-top: 8px;
 }
+
+.show-poster-thumb {
+  width: 36px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: rgba(63, 95, 78, 0.1);
+  box-shadow: 0 2px 8px rgba(47, 74, 60, 0.12);
+}
+
+.show-poster-thumb.placeholder {
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+}
+
+.detail-meta {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.detail-poster {
+  width: 72px;
+  height: 102px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex-shrink: 0;
+  box-shadow: 0 6px 14px rgba(47, 74, 60, 0.16);
+}
+
+.detail-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-content: flex-start;
+}

@@ -1,4 +1,5 @@
 import {
+  backfillMissingPosters,
   getCatalogEntry,
   isAnimeStatus,
   setCatalogOverride,
@@ -688,15 +689,19 @@ async function saveCurrentSession() {
 chrome.runtime.onInstalled.addListener(() => {
   void initializeStorage()
     .then(startTracking)
-    .then(injectIntoOpenWatchTabs);
+    .then(injectIntoOpenWatchTabs)
+    .then(() => backfillMissingPosters({ limit: 8 }));
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void startTracking().then(injectIntoOpenWatchTabs);
+  void startTracking()
+    .then(injectIntoOpenWatchTabs)
+    .then(() => backfillMissingPosters({ limit: 8 }));
 });
 
 void initializeStorage()
   .then(startTracking)
-  .then(injectIntoOpenWatchTabs);
+  .then(injectIntoOpenWatchTabs)
+  .then(() => backfillMissingPosters({ limit: 8 }));
 
 export { currentTracking, CONFIG };

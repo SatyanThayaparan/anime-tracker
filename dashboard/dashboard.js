@@ -19,13 +19,22 @@ import {
   computeInsights,
   dailyTotalsFromRaw,
 } from '../utils/metrics.js';
-import { getCatalogEntry, verifyAnimeTitle } from '../utils/anilist.js';
+import {
+  backfillMissingPosters,
+  catalogKey,
+  getAnimeCatalog,
+  getCatalogEntry,
+  getPosterUrl,
+  isConfidentAnimeMatch,
+  verifyAnimeTitle,
+} from '../utils/anilist.js';
 
 // State
 let currentRange = 1;
 let currentData = null;
 let currentInsights = null;
 let showTags = {};
+let animeCatalog = {};
 let activeDetailShow = null;
 let showChart = null;
 let hourlyChart = null;
@@ -169,10 +178,52 @@ function switchTab(tabId) {
 /**
  * Load data based on current range
  */
+async function ensureShowCatalog(shows = {}) {
+  const names = Object.keys(shows);
+  for (const name of names.slice(0, 12)) {
+    const key = catalogKey(name);
+    const existing = animeCatalog[key];
+    if (existing && (existing.status === 'rejected' || isConfidentAnimeMatch(existing))) {
+      if (isConfidentAnimeMatch(existing) && !getPosterUrl(existing)) {
+        // fall through to verify for poster backfill
+      } else {
+        continue;
+      }
+    }
+    try {
+      // Sequential to respect AniList rate limits
+      // eslint-disable-next-line no-await-in-loop
+      await verifyAnimeTitle(name);
+    } catch {
+      /* ignore */
+    }
+  }
+  animeCatalog = await getAnimeCatalog();
+}
+
+function posterForShow(showName) {
+  const entry = animeCatalog[catalogKey(showName)];
+  if (!isConfidentAnimeMatch(entry)) return null;
+  return getPosterUrl(entry);
+}
+
+function renderShowPoster(showName) {
+  const poster = posterForShow(showName);
+  if (!poster) {
+    return `<span class="show-poster-thumb placeholder" aria-hidden="true">📺</span>`;
+  }
+  return `<img class="show-poster-thumb" src="${escapeHtml(poster)}" alt="" width="36" height="50" loading="lazy" referrerpolicy="no-referrer">`;
+}
+
 async function loadData() {
   try {
     currentData = await getAggregatedData(currentRange);
     showTags = await getShowTags();
+    animeCatalog = await getAnimeCatalog();
+    await backfillMissingPosters({ limit: 6 });
+    await ensureShowCatalog(currentData.shows || {});
+    animeCatalog = await getAnimeCatalog();
+
     const streakRaw = await getDataForDates(getDateRange(90));
     currentInsights = computeInsights(currentData, {
       showTags,
@@ -511,6 +562,7 @@ function updateTopShowsTable() {
         <td>${index + 1}</td>
         <td>
           <div class="site-cell">
+            ${renderShowPoster(show.showName)}
             <span class="site-name">${safeName}</span>
           </div>
         </td>
@@ -558,6 +610,7 @@ function updateAllShowsTable() {
       <tr data-showname="${safeName}" tabindex="0" role="button" aria-label="Open details for ${safeName}">
         <td>
           <div class="site-cell">
+            ${renderShowPoster(show.showName)}
             <span class="site-name">${safeName}</span>
           </div>
         </td>
@@ -895,9 +948,17 @@ function openShowDetail(showName) {
   const site = show.site || show.platform || 'Unknown';
   const completed = getCompletedEpisodes(show.episodes);
   const episodeCount = Object.keys(show.episodes || {}).length;
+  const poster = posterForShow(showName);
   document.getElementById('detailMeta').innerHTML = `
-    <span class="detail-chip">${escapeHtml(site)}</span>
-    <span class="detail-chip accent">${completed}/${episodeCount || 0} episodes done</span>
+    ${
+      poster
+        ? `<img class="detail-poster" src="${escapeHtml(poster)}" alt="" width="72" height="102" referrerpolicy="no-referrer">`
+        : ''
+    }
+    <div class="detail-meta-chips">
+      <span class="detail-chip">${escapeHtml(site)}</span>
+      <span class="detail-chip accent">${completed}/${episodeCount || 0} episodes done</span>
+    </div>
   `;
 
   const avgSession =
@@ -1056,9 +1117,12 @@ async function renderDetailAnime(showName) {
         },
         async () => {
           void chrome.runtime.lastError;
+          animeCatalog = await getAnimeCatalog();
           await renderDetailAnime(showName);
           showTags = await getShowTags();
           renderDetailTags(showName);
+          updateTopShowsTable();
+          updateAllShowsTable();
           renderInsights();
         }
       );
@@ -1077,9 +1141,12 @@ async function renderDetailAnime(showName) {
         },
         async () => {
           void chrome.runtime.lastError;
+          animeCatalog = await getAnimeCatalog();
           await renderDetailAnime(showName);
           showTags = await getShowTags();
           renderDetailTags(showName);
+          updateTopShowsTable();
+          updateAllShowsTable();
           renderInsights();
         }
       );

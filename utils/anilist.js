@@ -208,19 +208,27 @@ export async function verifyAnimeTitle(showName, { force = false } = {}) {
     existing.status !== 'error';
   // Refresh once if an older cache entry has no poster.
   const needsCover =
-    existing?.match && !existing.match.coverImage && existing.status !== 'rejected';
+    Boolean(existing?.match) &&
+    !existing.match.coverImage &&
+    existing.status !== 'rejected';
+
+  // Preserve manual overrides unless we still need a poster backfill.
+  if (
+    !force &&
+    !needsCover &&
+    existing?.userOverride &&
+    (existing.status === 'confirmed' || existing.status === 'rejected')
+  ) {
+    return {
+      ...existing,
+      isAnime: existing.status === 'confirmed',
+    };
+  }
+
   if (!force && cacheFresh && !needsCover) {
     return {
       ...existing,
       isAnime: existing.status === 'confirmed' || existing.status === 'likely',
-    };
-  }
-
-  // Preserve manual overrides across refresh unless force clears them.
-  if (!force && existing?.userOverride && (existing.status === 'confirmed' || existing.status === 'rejected')) {
-    return {
-      ...existing,
-      isAnime: existing.status === 'confirmed',
     };
   }
 
@@ -235,16 +243,31 @@ export async function verifyAnimeTitle(showName, { force = false } = {}) {
       .sort((a, b) => b.confidence - a.confidence);
 
     const best = ranked[0] || null;
-    const confidence = best?.confidence || 0;
-    const status = statusFromConfidence(confidence, Boolean(best));
+    const confidence = best?.confidence || existing?.confidence || 0;
+    // Keep user confirmation; otherwise derive from score. If we only backfilled
+    // a poster for an override, keep their chosen match when possible.
+    let status = statusFromConfidence(confidence, Boolean(best));
+    let match = best;
+    if (existing?.userOverride && existing.status === 'confirmed') {
+      status = 'confirmed';
+      const same =
+        best &&
+        existing.match?.id != null &&
+        Number(best.id) === Number(existing.match.id);
+      match = same ? best : { ...existing.match, coverImage: best?.coverImage || existing.match?.coverImage || null };
+      if (!match?.coverImage && best?.coverImage) match = { ...match, coverImage: best.coverImage };
+    } else if (existing?.userOverride && existing.status === 'rejected' && !force) {
+      status = 'rejected';
+      match = null;
+    }
 
     const entry = await saveCatalogEntry(showName, {
       status,
-      confidence,
-      match: best,
+      confidence: status === 'confirmed' && existing?.userOverride ? Math.max(confidence, existing.confidence || 0, MIN_CONFIDENT) : confidence,
+      match,
       candidates: ranked.slice(0, 5),
       checkedAt: new Date().toISOString(),
-      userOverride: false,
+      userOverride: Boolean(existing?.userOverride) && !force,
       source: 'anilist',
     });
 
@@ -272,4 +295,41 @@ export async function verifyAnimeTitle(showName, { force = false } = {}) {
 
 export function isAnimeStatus(status) {
   return status === 'confirmed' || status === 'likely';
+}
+
+/**
+ * True when a catalog entry is a confident anime match (80%+ or user-confirmed).
+ */
+export function isConfidentAnimeMatch(entry) {
+  if (!entry || entry.status === 'rejected' || entry.status === 'error') return false;
+  if (entry.status === 'confirmed') return true;
+  return Boolean(entry.match) && (entry.confidence || 0) >= MIN_CONFIDENT;
+}
+
+export function getPosterUrl(entry) {
+  return entry?.match?.coverImage || null;
+}
+
+/**
+ * Backfill missing posters for cached confident matches.
+ */
+export async function backfillMissingPosters({ limit = 8 } = {}) {
+  const catalog = await getAnimeCatalog();
+  const missing = Object.values(catalog).filter(
+    (entry) =>
+      entry?.query &&
+      isConfidentAnimeMatch(entry) &&
+      entry.match &&
+      !entry.match.coverImage
+  );
+  const results = [];
+  for (const entry of missing.slice(0, limit)) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      results.push(await verifyAnimeTitle(entry.query, { force: false }));
+    } catch {
+      /* ignore individual failures */
+    }
+  }
+  return results;
 }
