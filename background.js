@@ -6,8 +6,8 @@ import {
   verifyAnimeTitle,
 } from './utils/anilist.js';
 import { extractHostname } from './utils/categories.js';
-import { isWatchSite } from './utils/shows.js';
-import { episodeStorageKey } from './utils/normalize.js';
+import { isPlayerPage, isWatchSite } from './utils/shows.js';
+import { episodeStorageKey, isUiNoiseTitle } from './utils/normalize.js';
 import {
   CURRENT_SCHEMA_VERSION,
   getDateKey,
@@ -400,20 +400,37 @@ function handleMessage(message, sender, sendResponse) {
       currentTracking.videoProgress = message.videoProgress || null;
       if (message.url) currentTracking.url = message.url;
 
-      const playing = isTrackedVideoPlaying();
-      // Keep the session open while this tab is on a show; classify play vs pause on save.
-      const wasPlaying = currentTracking.isPlaying;
-      currentTracking.isPlaying = message.videoProgress != null ? playing : true;
-      currentTracking.isActive = true;
-      currentTracking.lastActivityTime = Date.now();
-      if (!currentTracking.startTime) currentTracking.startTime = Date.now();
+      // Never assume "playing" when progress is missing — that inflated Disney+ time.
+      const playing =
+        typeof message.playing === 'boolean'
+          ? message.playing
+          : isTrackedVideoPlaying();
+      const wasPlaying = currentTracking.isPlaying === true;
 
-      // Flush when play/pause flips so focus ratio splits cleanly.
-      if (wasPlaying != null && wasPlaying !== currentTracking.isPlaying) {
-        void saveCurrentSession();
+      if (wasPlaying && !playing) {
+        // Flush the playing segment, then stop the clock.
+        currentTracking.isPlaying = true;
+        void saveCurrentSession().then(() => {
+          currentTracking.isPlaying = false;
+          currentTracking.isActive = false;
+          currentTracking.startTime = Date.now();
+        });
+      } else if (!wasPlaying && playing) {
+        currentTracking.isPlaying = true;
+        currentTracking.isActive = true;
+        currentTracking.startTime = Date.now();
+        currentTracking.lastActivityTime = Date.now();
+      } else if (playing) {
+        currentTracking.isPlaying = true;
+        currentTracking.isActive = true;
+        currentTracking.lastActivityTime = Date.now();
+        if (!currentTracking.startTime) currentTracking.startTime = Date.now();
+      } else {
+        currentTracking.isPlaying = false;
+        currentTracking.isActive = false;
       }
 
-      if (message.showInfo?.showName) {
+      if (message.showInfo?.showName && !isUiNoiseTitle(message.showInfo.showName)) {
         const nextName = message.showInfo.showName;
         // Netflix often omits season from the title overlay — keep last known
         // season for the same show instead of falling back to Season 1.
@@ -552,6 +569,26 @@ async function saveCurrentSession() {
     return;
   }
 
+  if (isUiNoiseTitle(currentTracking.showName)) {
+    currentTracking.startTime = Date.now();
+    return;
+  }
+
+  // Only persist time while the video is actually playing.
+  const playing =
+    currentTracking.isPlaying != null
+      ? currentTracking.isPlaying
+      : isTrackedVideoPlaying();
+  if (!playing) {
+    currentTracking.startTime = Date.now();
+    return;
+  }
+
+  if (currentTracking.url && !isPlayerPage(currentTracking.url)) {
+    currentTracking.startTime = Date.now();
+    return;
+  }
+
   const settings = await getSettings();
   if (settings.animeOnlyTracking) {
     let match = currentTracking.animeMatch;
@@ -567,11 +604,7 @@ async function saveCurrentSession() {
   }
 
   const now = Date.now();
-  let sessionDuration = now - currentTracking.startTime;
-
-  if (!currentTracking.isActive && currentTracking.lastActivityTime) {
-    sessionDuration = Math.max(0, currentTracking.lastActivityTime - currentTracking.startTime);
-  }
+  const sessionDuration = now - currentTracking.startTime;
 
   if (sessionDuration < CONFIG.MIN_SAVE_MS) {
     return;
@@ -604,14 +637,9 @@ async function saveCurrentSession() {
     }
 
     const showData = dayData.shows[currentTracking.showName];
-    const playing =
-      currentTracking.isPlaying != null
-        ? currentTracking.isPlaying
-        : isTrackedVideoPlaying();
 
     showData.totalTime += sessionDuration;
-    if (playing) showData.activeTime += sessionDuration;
-    else showData.pausedTime = (showData.pausedTime || 0) + sessionDuration;
+    showData.activeTime += sessionDuration;
     showData.lastWatched = now;
     showData.site = currentTracking.hostname;
     showData.platform = currentTracking.platform;
@@ -644,7 +672,7 @@ async function saveCurrentSession() {
 
       const episodeData = showData.episodes[episodeKey];
       const wasCompleted = Boolean(episodeData.completed);
-      if (playing) episodeData.time += sessionDuration;
+      episodeData.time += sessionDuration;
       episodeData.timestamp = now;
       episodeData.seasonNumber =
         currentTracking.seasonNumber != null

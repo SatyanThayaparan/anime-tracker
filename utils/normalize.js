@@ -12,6 +12,33 @@ const SERVICE_NAMES = new Set([
   'shiori',
 ]);
 
+/** Disney+/Netflix chrome that must never become a “show”. */
+const UI_NOISE_TITLES = new Set([
+  'select profile',
+  'who is watching',
+  'who\'s watching',
+  'search',
+  'for you',
+  'home',
+  'browse',
+  'movies',
+  'series',
+  'originals',
+  'sports',
+  'extras',
+  'privacy preference center',
+  'privacy preferences',
+  'cookie settings',
+  'manage privacy preferences',
+  'one trust',
+  'onetrust',
+  'loading',
+  'disney+',
+  'disney plus',
+  'netflix',
+  'youtube',
+]);
+
 export function cleanText(value) {
   return String(value || '')
     .replace(/\s+/g, ' ')
@@ -22,6 +49,16 @@ export function cleanText(value) {
 export function isServiceName(name) {
   const key = cleanText(name).toLowerCase();
   return !key || SERVICE_NAMES.has(key);
+}
+
+export function isUiNoiseTitle(name) {
+  const key = cleanText(name).toLowerCase();
+  if (!key) return true;
+  if (UI_NOISE_TITLES.has(key)) return true;
+  if (key.includes('privacy preference')) return true;
+  if (key.includes('cookie')) return true;
+  if (key.startsWith('onetrust')) return true;
+  return false;
 }
 
 /**
@@ -169,7 +206,7 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
     .replace(/\s*[-–|]\s*Disney\+.*$/i, '')
     .trim();
 
-  if (isServiceName(title)) return null;
+  if (isServiceName(title) || isUiNoiseTitle(title)) return null;
 
   let seasonNumber = null;
   let episodeNumber = null;
@@ -205,7 +242,16 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
   }
 
   title = cleanText(title);
-  if (isServiceName(title) || title.length < 1) return null;
+  if (isServiceName(title) || isUiNoiseTitle(title) || title.length < 1) return null;
+
+  if (episodeLabel && isUiNoiseTitle(episodeLabel)) {
+    episodeLabel =
+      seasonNumber != null && episodeNumber != null
+        ? `S${seasonNumber} E${episodeNumber}`
+        : episodeNumber != null
+          ? `Episode ${episodeNumber}`
+          : null;
+  }
 
   return {
     showName: title,

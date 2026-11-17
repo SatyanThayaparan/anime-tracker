@@ -4,6 +4,7 @@
 
 import {
   cleanText,
+  isUiNoiseTitle,
   normalizeWatchIdentity,
   parseEpisodeLabel,
   parseSeasonOnly,
@@ -73,11 +74,96 @@ export function findVideoPlayer(doc = document) {
   const videos = Array.from(doc.querySelectorAll('video'));
   if (!videos.length) return null;
 
+  // Prefer a video that is actually playing / has media time.
+  const playing = videos.find((video) => {
+    try {
+      return !video.paused && !video.ended && video.readyState >= 2;
+    } catch {
+      return false;
+    }
+  });
+  if (playing) return playing;
+
   const visible = videos.find((video) => {
     const rect = video.getBoundingClientRect();
     return rect.width > 80 && rect.height > 45;
   });
   return visible || videos[0];
+}
+
+/**
+ * True when the URL is a playback page (not browse/search/profile).
+ * @param {string} url
+ * @param {'netflix'|'youtube'|'disneyplus'|null} [platform]
+ */
+export function isPlayerPage(url, platform = getPlatform(url)) {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    if (platform === 'netflix') return path.includes('/watch');
+    if (platform === 'youtube') return path.includes('/watch') || path === '/';
+    if (platform === 'disneyplus') {
+      return (
+        path.includes('/play/') ||
+        path.includes('/video/') ||
+        path.includes('/watch/')
+      );
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * DOM fallback when HTML5 media progress is blocked (common on Disney+).
+ * Only call on player pages.
+ * @param {Document} doc
+ * @returns {{ paused: boolean, ended: boolean, currentTime: number, duration: number, progress: number, timestamp: number, inferred: boolean }|null}
+ */
+export function inferPlaybackState(doc = document) {
+  const pauseControl = doc.querySelector(
+    [
+      '[data-testid="pause-button"]',
+      '[data-testid="control-pause"]',
+      'button[aria-label="Pause"]',
+      'button[aria-label*="Pause" i]',
+      '[aria-label="Pause"]',
+    ].join(', ')
+  );
+  if (pauseControl) {
+    return {
+      currentTime: 0,
+      duration: 0,
+      progress: 0,
+      paused: false,
+      ended: false,
+      timestamp: Date.now(),
+      inferred: true,
+    };
+  }
+
+  const playControl = doc.querySelector(
+    [
+      '[data-testid="play-button"]',
+      '[data-testid="control-play"]',
+      'button[aria-label="Play"]',
+      'button[aria-label*="Play" i]',
+      '[aria-label="Play"]',
+    ].join(', ')
+  );
+  if (playControl) {
+    return {
+      currentTime: 0,
+      duration: 0,
+      progress: 0,
+      paused: true,
+      ended: false,
+      timestamp: Date.now(),
+      inferred: true,
+    };
+  }
+
+  return null;
 }
 
 function parseYouTube(url, doc = document) {
@@ -258,32 +344,39 @@ function parseNetflix(url, doc = document) {
 }
 
 function parseDisneyPlus(url, doc = document) {
-  const title =
+  // Browse / profile / search pages are not watch sessions.
+  if (!isPlayerPage(url, 'disneyplus')) return null;
+
+  const titleCandidates = [
     firstText(
       [
         '[data-testid="title-text"]',
         '[data-testid="asset-title"]',
-        'h1',
+        '[data-testid="player-title"]',
         '.title-field',
         '[class*="titleText"]',
       ],
       doc
-    ) ||
-    cleanText(doc.querySelector('meta[property="og:title"]')?.content) ||
-    cleanText(doc.title.replace(/\s*\|\s*Disney\+.*$/i, ''));
+    ),
+    cleanText(doc.querySelector('meta[property="og:title"]')?.content),
+    cleanText(doc.title.replace(/\s*\|\s*Disney\+.*$/i, '')),
+  ].filter((t) => t && !isUiNoiseTitle(t));
 
-  const episodeText = firstText(
+  // Avoid bare `h1`/`h2` — cookie banners (“Privacy Preference Center”) win those.
+  const title = titleCandidates[0] || '';
+
+  let episodeText = firstText(
     [
       '[data-testid="subtitle-text"]',
       '[data-testid="episode-title"]',
-      '[class*="subtitle"]',
-      'h2',
+      '[data-testid="player-subtitle"]',
     ],
     doc
   );
+  if (episodeText && isUiNoiseTitle(episodeText)) episodeText = '';
 
   const normalized = normalizeWatchIdentity(title, episodeText);
-  if (!normalized) return null;
+  if (!normalized || isUiNoiseTitle(normalized.showName)) return null;
 
   return {
     showName: normalized.showName,

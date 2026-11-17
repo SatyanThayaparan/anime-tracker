@@ -2,7 +2,7 @@
   "name": "anime-tracker",
   "private": true,
   "type": "module",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Shiori — bookmark your anime watching on Netflix, YouTube, and Disney+",
   "scripts": {
     "version:bump": "node scripts/bump-version.mjs",

@@ -66,7 +66,13 @@
 
   if (stopped) return;
 
-  const { extractShowInfo, isWatchSite, findVideoPlayer } = shows;
+  const {
+    extractShowInfo,
+    isWatchSite,
+    isPlayerPage,
+    findVideoPlayer,
+    inferPlaybackState,
+  } = shows;
 
   let lastActivityTime = Date.now();
   let lastHeartbeatTime = 0;
@@ -79,6 +85,7 @@
   let activityTimeout = null;
   let lastUrl = window.location.href;
   let observer = null;
+  let lastKnownPlaying = false;
 
   function updateShowInfo(force = false) {
     if (stopped) return;
@@ -94,8 +101,9 @@
     }
 
     const url = window.location.href;
-    if (!isWatchSite(url)) {
+    if (!isWatchSite(url) || !isPlayerPage(url)) {
       currentShowInfo = null;
+      lastShowInfoUpdate = now;
       return;
     }
 
@@ -111,6 +119,10 @@
       }
       currentShowInfo = info;
       lastShowInfoUpdate = now;
+    } else {
+      // Left a real title for browse chrome — clear so we stop attributing time.
+      currentShowInfo = null;
+      lastShowInfoUpdate = now;
     }
   }
 
@@ -124,28 +136,35 @@
 
   function updateVideoProgress() {
     if (stopped) return;
-    if (!currentVideoPlayer) {
-      videoProgress = null;
+    const url = window.location.href;
+
+    if (!currentVideoPlayer || !document.contains(currentVideoPlayer)) {
+      // Disney+ often blocks media progress — infer play/pause from player chrome.
+      videoProgress =
+        isPlayerPage(url) && typeof inferPlaybackState === 'function'
+          ? inferPlaybackState(document)
+          : null;
       return;
     }
 
     try {
-      const currentTime = currentVideoPlayer.currentTime || 0;
-      const duration = currentVideoPlayer.duration || 0;
-      if (duration > 0 && currentTime >= 0) {
-        videoProgress = {
-          currentTime: Math.floor(currentTime),
-          duration: Math.floor(duration),
-          progress: currentTime / duration,
-          paused: Boolean(currentVideoPlayer.paused),
-          ended: Boolean(currentVideoPlayer.ended),
-          timestamp: Date.now(),
-        };
-      } else {
-        videoProgress = null;
-      }
+      const currentTime = Number(currentVideoPlayer.currentTime) || 0;
+      const duration = Number(currentVideoPlayer.duration);
+      const hasDuration = Number.isFinite(duration) && duration > 0;
+      // Always report play/pause even when duration is unknown (DRM players).
+      videoProgress = {
+        currentTime: Math.floor(currentTime),
+        duration: hasDuration ? Math.floor(duration) : 0,
+        progress: hasDuration ? currentTime / duration : 0,
+        paused: Boolean(currentVideoPlayer.paused),
+        ended: Boolean(currentVideoPlayer.ended),
+        timestamp: Date.now(),
+      };
     } catch {
-      videoProgress = null;
+      videoProgress =
+        isPlayerPage(url) && typeof inferPlaybackState === 'function'
+          ? inferPlaybackState(document)
+          : null;
     }
   }
 
@@ -211,12 +230,13 @@
     updateShowInfo();
     updateVideoProgress();
 
-    const recentlyActive = now - lastActivityTime < HEARTBEAT_INTERVAL * 1.5;
     const playing = isVideoPlaying();
+    const onPlayer = isPlayerPage(window.location.href);
 
-    // Count while the video is playing even if Chrome is unfocused / another app is open.
-    // Only require page focus for non-playing idle activity.
-    if (!force && !playing && (!isPageVisible || !recentlyActive)) return;
+    // Only pulse while actually playing (or a forced pause/play edge).
+    // Mouse activity on a paused player must not keep the session counting.
+    if (!force && !playing) return;
+    if (!force && !onPlayer) return;
     if (!force && now - lastHeartbeatTime < HEARTBEAT_INTERVAL) return;
 
     try {
@@ -231,6 +251,7 @@
           videoProgress,
           url: window.location.href,
           at: now,
+          playing,
         },
         () => {
           void chrome.runtime.lastError;
@@ -344,7 +365,15 @@
       if (isPageVisible || isVideoPlaying()) detectVideoPlayer();
     }, VIDEO_DETECTION_INTERVAL);
     trackInterval(() => {
-      if (currentVideoPlayer) updateVideoProgress();
+      updateVideoProgress();
+      const playing = isVideoPlaying();
+      // Catch play/pause when DRM blocks media events (Disney+).
+      if (playing !== lastKnownPlaying) {
+        lastKnownPlaying = playing;
+        sendHeartbeat(true);
+      } else {
+        lastKnownPlaying = playing;
+      }
     }, VIDEO_UPDATE_INTERVAL);
     trackInterval(checkSpaNavigation, 1000);
 
