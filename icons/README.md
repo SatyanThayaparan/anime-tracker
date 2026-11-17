@@ -1,6 +1,6 @@
 # Shiori icons
 
-Bookmark mark for **Shiori** (栞) — soft sky, forest hills, cream page, and a ribbon bookmark with a rust tassel. Ghibli-inspired atmosphere; not based on any Studio Ghibli character or logo.
+Bookmark mark for **Shiori** (栞) — solid forest field, cream ribbon bookmark, rust cord/tassel. Flat and readable at toolbar size.
 
 | File | Use |
 |------|-----|
