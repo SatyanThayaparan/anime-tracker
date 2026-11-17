@@ -11,12 +11,15 @@ import {
   getCompletedEpisodes,
   getShowTags,
   setShowTags,
+  getSettings,
+  saveSettings,
 } from '../utils/storage.js';
 import {
   SUGGESTED_TAGS,
   computeInsights,
   dailyTotalsFromRaw,
 } from '../utils/metrics.js';
+import { getCatalogEntry, verifyAnimeTitle } from '../utils/anilist.js';
 
 // State
 let currentRange = 1;
@@ -35,6 +38,7 @@ let platformChart = null;
 async function initDashboard() {
   setupEventListeners();
   window.addEventListener('resize', resizeVisibleCharts);
+  await loadSettingsUi();
   await loadData();
 }
 
@@ -115,6 +119,25 @@ function setupEventListeners() {
   if (datalist) {
     datalist.innerHTML = SUGGESTED_TAGS.map((tag) => `<option value="${tag}"></option>`).join('');
   }
+
+  document.getElementById('settingAnimeOnly')?.addEventListener('change', async (e) => {
+    const settings = await getSettings();
+    settings.animeOnlyTracking = Boolean(e.target.checked);
+    await saveSettings(settings);
+  });
+  document.getElementById('settingAutoTag')?.addEventListener('change', async (e) => {
+    const settings = await getSettings();
+    settings.autoTagFromAniList = Boolean(e.target.checked);
+    await saveSettings(settings);
+  });
+}
+
+async function loadSettingsUi() {
+  const settings = await getSettings();
+  const animeOnly = document.getElementById('settingAnimeOnly');
+  const autoTag = document.getElementById('settingAutoTag');
+  if (animeOnly) animeOnly.checked = Boolean(settings.animeOnlyTracking);
+  if (autoTag) autoTag.checked = settings.autoTagFromAniList !== false;
 }
 
 /**
@@ -935,11 +958,133 @@ function openShowDetail(showName) {
   }).join('');
 
   renderDetailTags(showName);
+  void renderDetailAnime(showName);
 
   overlay.hidden = false;
   drawer.classList.add('open');
   drawer.setAttribute('aria-hidden', 'false');
   closePeek();
+}
+
+async function renderDetailAnime(showName) {
+  const el = document.getElementById('detailAnime');
+  if (!el) return;
+  el.innerHTML = `<p class="empty-state">Checking AniList…</p>`;
+
+  let entry = await getCatalogEntry(showName);
+  if (!entry || entry.status === 'error') {
+    entry = await verifyAnimeTitle(showName, { force: entry?.status === 'error' });
+  }
+
+  if (!entry || entry.status === 'error') {
+    el.innerHTML = `
+      <p class="empty-state">Could not reach AniList.</p>
+      <button type="button" class="btn btn-secondary btn-sm" data-anime-action="retry">Retry</button>
+    `;
+  } else if (entry.status === 'confirmed' || entry.status === 'likely') {
+    const title =
+      entry.match?.title?.english ||
+      entry.match?.title?.romaji ||
+      entry.match?.title?.userPreferred ||
+      'Matched anime';
+    const pct = Math.round((entry.confidence || 0) * 100);
+    el.innerHTML = `
+      <div class="detail-anime-card">
+        <span class="detail-chip accent">${entry.status === 'confirmed' ? 'Anime' : 'Likely anime'} · ${pct}%</span>
+        <p class="detail-anime-title">${escapeHtml(title)}</p>
+        <p class="detail-anime-meta">${escapeHtml((entry.match?.format || 'ANIME').replaceAll('_', ' '))}${
+          entry.match?.episodes ? ` · ${entry.match.episodes} eps` : ''
+        }${entry.match?.genres?.length ? ` · ${escapeHtml(entry.match.genres.slice(0, 4).join(', '))}` : ''}</p>
+        <div class="anime-actions">
+          ${
+            entry.match?.siteUrl
+              ? `<a class="btn btn-secondary btn-sm" href="${escapeHtml(entry.match.siteUrl)}" target="_blank" rel="noreferrer">Open AniList</a>`
+              : ''
+          }
+          ${
+            entry.status === 'likely'
+              ? `<button type="button" class="btn btn-primary btn-sm" data-anime-action="confirm">Confirm</button>`
+              : ''
+          }
+          <button type="button" class="btn btn-secondary btn-sm" data-anime-action="reject">Not anime</button>
+        </div>
+      </div>
+    `;
+  } else {
+    const candidates = entry.candidates || [];
+    el.innerHTML = `
+      <p class="empty-state">No confident AniList match.</p>
+      ${
+        candidates.length
+          ? `<div class="detail-list">${candidates
+              .slice(0, 4)
+              .map((c) => {
+                const label = c.title?.english || c.title?.romaji || c.title?.userPreferred || 'Candidate';
+                return `<div class="detail-episode">
+                  <span class="ep-name">${escapeHtml(label)}</span>
+                  <span class="ep-time">${Math.round((c.confidence || 0) * 100)}%</span>
+                  <span class="ep-sub">${escapeHtml((c.format || '').replaceAll('_', ' '))}${
+                    c.genres?.length ? ` · ${escapeHtml(c.genres.slice(0, 3).join(', '))}` : ''
+                  }</span>
+                  <button type="button" class="btn btn-secondary btn-sm" data-anime-pick="${c.id}">Use this</button>
+                </div>`;
+              })
+              .join('')}</div>`
+          : ''
+      }
+      <div class="anime-actions" style="margin-top:8px">
+        <button type="button" class="btn btn-primary btn-sm" data-anime-action="confirm">Mark as anime</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-anime-action="retry">Search again</button>
+      </div>
+    `;
+  }
+
+  el.querySelectorAll('[data-anime-action]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.animeAction;
+      if (action === 'retry') {
+        await verifyAnimeTitle(showName, { force: true });
+        await renderDetailAnime(showName);
+        return;
+      }
+      chrome.runtime.sendMessage(
+        {
+          type: 'SET_ANIME_OVERRIDE',
+          showName,
+          status: action === 'confirm' ? 'confirmed' : 'rejected',
+          match: action === 'confirm' ? entry?.match || null : null,
+        },
+        async () => {
+          void chrome.runtime.lastError;
+          await renderDetailAnime(showName);
+          showTags = await getShowTags();
+          renderDetailTags(showName);
+          renderInsights();
+        }
+      );
+    });
+  });
+
+  el.querySelectorAll('[data-anime-pick]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pick = (entry.candidates || []).find((c) => String(c.id) === String(btn.dataset.animePick));
+      chrome.runtime.sendMessage(
+        {
+          type: 'SET_ANIME_OVERRIDE',
+          showName,
+          status: 'confirmed',
+          match: pick || null,
+        },
+        async () => {
+          void chrome.runtime.lastError;
+          await renderDetailAnime(showName);
+          showTags = await getShowTags();
+          renderDetailTags(showName);
+          renderInsights();
+        }
+      );
+    });
+  });
 }
 
 function closeShowDetail() {

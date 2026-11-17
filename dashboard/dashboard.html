@@ -162,6 +162,20 @@
       <!-- Settings Tab -->
       <div id="settingsTab" class="tab-content">
         <div class="settings-section">
+          <h3>Anime verification</h3>
+          <p class="settings-description">
+            Titles are checked against AniList. Cache results locally and optionally ignore non-anime.
+          </p>
+          <label class="settings-toggle">
+            <input type="checkbox" id="settingAnimeOnly">
+            <span>Only track titles verified as anime</span>
+          </label>
+          <label class="settings-toggle">
+            <input type="checkbox" id="settingAutoTag" checked>
+            <span>Auto-fill genre tags from AniList matches</span>
+          </label>
+        </div>
+        <div class="settings-section">
           <h3>Data Management</h3>
           <div class="settings-actions">
             <button class="btn btn-secondary" id="exportDataBtn">
@@ -187,6 +201,10 @@
       <button type="button" class="detail-close" id="detailClose" aria-label="Close details">×</button>
     </div>
     <div class="detail-meta" id="detailMeta"></div>
+    <div class="detail-section" id="detailAnimeSection">
+      <h3>AniList match</h3>
+      <div id="detailAnime" class="detail-anime"></div>
+    </div>
     <div class="detail-stats" id="detailStats"></div>
     <div class="detail-section">
       <h3>Genre / tags</h3>

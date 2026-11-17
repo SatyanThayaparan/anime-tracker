@@ -321,10 +321,13 @@ export function formatTimeDigital(ms) {
  */
 export async function getSettings() {
   const data = await chrome.storage.local.get(['settings']);
-  return data.settings || {
+  return {
     idleThreshold: 60,
     sessionTimeout: 1800000,
-    customCategories: null
+    customCategories: null,
+    animeOnlyTracking: false,
+    autoTagFromAniList: true,
+    ...(data.settings || {}),
   };
 }
 

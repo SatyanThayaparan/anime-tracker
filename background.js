@@ -1,9 +1,18 @@
+import {
+  getCatalogEntry,
+  isAnimeStatus,
+  setCatalogOverride,
+  verifyAnimeTitle,
+} from './utils/anilist.js';
 import { extractHostname } from './utils/categories.js';
 import { isWatchSite } from './utils/shows.js';
 import {
   CURRENT_SCHEMA_VERSION,
   getDateKey,
+  getSettings,
+  getShowTags,
   migrateWatchData,
+  setShowTags,
 } from './utils/storage.js';
 
 const SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
@@ -20,6 +29,8 @@ let lastHeartbeatAt = null;
 let listenersBound = false;
 /** Tabs where content.js has been injected in this service-worker lifetime. */
 const contentReadyTabs = new Set();
+/** In-flight AniList lookups keyed by catalog title. */
+const animeVerifyInflight = new Map();
 
 function emptyTracking() {
   return {
@@ -35,7 +46,42 @@ function emptyTracking() {
     isActive: false,
     isPlaying: null,
     videoProgress: null,
+    animeMatch: null,
   };
+}
+
+async function maybeAutoTagFromAniList(showName, match) {
+  if (!showName || !match?.genres?.length) return;
+  const settings = await getSettings();
+  if (!settings.autoTagFromAniList) return;
+  const existing = await getShowTags();
+  if ((existing[showName] || []).length) return;
+  const tags = match.genres.map((g) => String(g).toLowerCase()).slice(0, 6);
+  await setShowTags(showName, tags);
+}
+
+async function ensureAnimeVerification(showName, { force = false } = {}) {
+  if (!showName) return null;
+  const key = showName.toLowerCase();
+  if (!force && animeVerifyInflight.has(key)) {
+    return animeVerifyInflight.get(key);
+  }
+
+  const job = (async () => {
+    const result = await verifyAnimeTitle(showName, { force });
+    if (currentTracking.showName === showName) {
+      currentTracking.animeMatch = result;
+    }
+    if (result?.isAnime && result.match) {
+      await maybeAutoTagFromAniList(showName, result.match);
+    }
+    return result;
+  })().finally(() => {
+    animeVerifyInflight.delete(key);
+  });
+
+  animeVerifyInflight.set(key, job);
+  return job;
 }
 
 async function initializeStorage() {
@@ -335,10 +381,15 @@ function handleMessage(message, sender, sendResponse) {
           });
         }
 
+        const showChanged = currentTracking.showName !== nextName;
         currentTracking.showName = nextName;
         currentTracking.episodeNumber = message.showInfo.episodeNumber ?? null;
         currentTracking.episodeLabel = message.showInfo.episodeLabel ?? null;
         if (message.showInfo.site) currentTracking.platform = message.showInfo.site;
+
+        if (showChanged || !currentTracking.animeMatch) {
+          void ensureAnimeVerification(nextName);
+        }
       }
 
     }
@@ -348,14 +399,55 @@ function handleMessage(message, sender, sendResponse) {
   }
 
   if (message?.type === 'GET_TRACKING_STATE') {
-    sendResponse({
-      tracking: currentTracking,
-      debug: {
-        lastHeartbeatAt,
-        schemaVersion: SCHEMA_VERSION,
-        alarm: ALARM_SAVE,
-      },
-    });
+    const respond = async () => {
+      if (currentTracking.showName && !currentTracking.animeMatch) {
+        currentTracking.animeMatch = await getCatalogEntry(currentTracking.showName);
+      }
+      return {
+        tracking: currentTracking,
+        debug: {
+          lastHeartbeatAt,
+          schemaVersion: SCHEMA_VERSION,
+          alarm: ALARM_SAVE,
+        },
+      };
+    };
+    respond().then(sendResponse);
+    return true;
+  }
+
+  if (message?.type === 'VERIFY_ANIME') {
+    ensureAnimeVerification(message.showName, { force: Boolean(message.force) })
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === 'SET_ANIME_OVERRIDE') {
+    setCatalogOverride(message.showName, {
+      status: message.status,
+      match: message.match || null,
+    })
+      .then(async (entry) => {
+        if (currentTracking.showName === message.showName) {
+          currentTracking.animeMatch = {
+            ...entry,
+            isAnime: isAnimeStatus(entry.status),
+          };
+        }
+        if (entry.status === 'confirmed' && entry.match) {
+          await maybeAutoTagFromAniList(message.showName, entry.match);
+        }
+        sendResponse({ ok: true, result: entry });
+      })
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === 'GET_ANIME_CATALOG_ENTRY') {
+    getCatalogEntry(message.showName)
+      .then((entry) => sendResponse({ ok: true, result: entry }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
@@ -365,6 +457,20 @@ function handleMessage(message, sender, sendResponse) {
 async function saveCurrentSession() {
   if (!currentTracking.hostname || !currentTracking.startTime || !currentTracking.showName) {
     return;
+  }
+
+  const settings = await getSettings();
+  if (settings.animeOnlyTracking) {
+    let match = currentTracking.animeMatch;
+    if (!match) {
+      match = await ensureAnimeVerification(currentTracking.showName);
+      currentTracking.animeMatch = match;
+    }
+    // Still counting while lookup is in-flight/error; skip clear non-anime.
+    if (match && (match.status === 'rejected' || match.status === 'unlikely')) {
+      currentTracking.startTime = Date.now();
+      return;
+    }
   }
 
   const now = Date.now();

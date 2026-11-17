@@ -88,6 +88,8 @@ function displayCurrentWatching(tracking) {
   const site = tracking.platform || tracking.hostname || 'streaming site';
   const paused = tracking.videoProgress?.paused;
   const inactive = tracking.isActive === false;
+  const anime = tracking.animeMatch;
+  const animeBadge = renderAnimeBadge(anime);
 
   let progressHTML = '';
   const vp = tracking.videoProgress;
@@ -115,10 +117,95 @@ function displayCurrentWatching(tracking) {
         <div class="show-name">${escapeHtml(tracking.showName)}</div>
         ${episodeInfo}
         <div class="show-site">on ${escapeHtml(site)}</div>
+        ${animeBadge}
       </div>
       ${progressHTML}
     </div>
   `;
+
+  bindAnimeActions(container, tracking.showName, anime);
+}
+
+function renderAnimeBadge(anime) {
+  if (!anime) {
+    return `<div class="anime-badge checking">Checking AniList…</div>`;
+  }
+  if (anime.status === 'error') {
+    return `
+      <div class="anime-badge warn">AniList unavailable</div>
+      <div class="anime-actions">
+        <button type="button" class="anime-btn" data-anime-action="retry">Retry</button>
+      </div>
+    `;
+  }
+  if (anime.status === 'confirmed' || anime.status === 'likely') {
+    const title =
+      anime.match?.title?.english ||
+      anime.match?.title?.romaji ||
+      anime.match?.title?.userPreferred ||
+      'Matched';
+    const pct = Math.round((anime.confidence || 0) * 100);
+    return `
+      <div class="anime-badge ok">Anime · ${escapeHtml(title)} (${pct}%)</div>
+      <div class="anime-actions">
+        ${
+          anime.status === 'likely'
+            ? `<button type="button" class="anime-btn" data-anime-action="confirm">Confirm</button>`
+            : ''
+        }
+        <button type="button" class="anime-btn ghost" data-anime-action="reject">Not anime</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="anime-badge warn">Not found as anime</div>
+    <div class="anime-actions">
+      <button type="button" class="anime-btn" data-anime-action="confirm">Mark as anime</button>
+      <button type="button" class="anime-btn ghost" data-anime-action="retry">Search again</button>
+    </div>
+  `;
+}
+
+function bindAnimeActions(container, showName, anime) {
+  container.querySelectorAll('[data-anime-action]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.animeAction;
+      if (action === 'retry') {
+        chrome.runtime.sendMessage(
+          { type: 'VERIFY_ANIME', showName, force: true },
+          () => {
+            void chrome.runtime.lastError;
+            void loadCurrentWatching();
+          }
+        );
+        return;
+      }
+      if (action === 'confirm') {
+        chrome.runtime.sendMessage(
+          {
+            type: 'SET_ANIME_OVERRIDE',
+            showName,
+            status: 'confirmed',
+            match: anime?.match || null,
+          },
+          () => {
+            void chrome.runtime.lastError;
+            void loadCurrentWatching();
+          }
+        );
+        return;
+      }
+      if (action === 'reject') {
+        chrome.runtime.sendMessage(
+          { type: 'SET_ANIME_OVERRIDE', showName, status: 'rejected', match: null },
+          () => {
+            void chrome.runtime.lastError;
+            void loadCurrentWatching();
+          }
+        );
+      }
+    });
+  });
 }
 
 function displayDebug(debug, tracking) {
