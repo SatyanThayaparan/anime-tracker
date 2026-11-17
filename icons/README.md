@@ -1,6 +1,6 @@
-# Anime Tracker icons
+# Shiori icons
 
-Original “cottage window” mark — Ghibli-inspired atmosphere (soft sky, forest hills, warm wood frame, rust leaf accent). Not based on any existing Studio Ghibli character or logo.
+Bookmark mark for **Shiori** (栞) — soft sky, forest hills, cream page, and a ribbon bookmark with a rust tassel. Ghibli-inspired atmosphere; not based on any Studio Ghibli character or logo.
 
 | File | Use |
 |------|-----|

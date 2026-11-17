@@ -1,4 +1,6 @@
-# Anime Tracker
+# Shiori (栞)
+
+**Shiori** means *bookmark* in Japanese — a quiet name for keeping your place in the shows you watch.
 
 Chrome extension that tracks watching time on **Netflix**, **YouTube**, and **Disney+**. Stats stay local in your browser (daily / weekly / monthly), with a popup for “now watching” and a full dashboard.
 

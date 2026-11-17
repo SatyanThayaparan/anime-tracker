@@ -1,5 +1,5 @@
 /**
- * Storage utilities for Anime Tracker
+ * Storage utilities for Shiori
  * Helper functions for reading/writing usage data and aggregation
  */
 

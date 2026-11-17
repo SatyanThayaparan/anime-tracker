@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Anime Tracker",
-  "version": "1.5.6",
-  "description": "Track watching time on Netflix, YouTube, and Disney+ with local daily, weekly, and monthly stats.",
+  "name": "Shiori",
+  "version": "1.6.0",
+  "description": "Shiori (栞) — bookmark your anime watching on Netflix, YouTube, and Disney+.",
   "permissions": [
     "tabs",
     "storage",
@@ -58,7 +58,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "Anime Tracker"
+    "default_title": "Shiori"
   },
   "icons": {
     "16": "icons/icon16.png",

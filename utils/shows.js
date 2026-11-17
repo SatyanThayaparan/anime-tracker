@@ -309,7 +309,7 @@ export function extractShowInfo(url, doc = document) {
     if (platform === 'netflix') return parseNetflix(url, doc);
     if (platform === 'disneyplus') return parseDisneyPlus(url, doc);
   } catch (error) {
-    console.debug('[Anime Tracker] extractShowInfo failed', error);
+    console.debug('[Shiori] extractShowInfo failed', error);
   }
 
   const fallback = normalizeWatchIdentity(doc?.title || '');

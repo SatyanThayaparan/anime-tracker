@@ -9,6 +9,7 @@ const SERVICE_NAMES = new Set([
   'disney plus',
   'disneyplus',
   'anime tracker',
+  'shiori',
 ]);
 
 export function cleanText(value) {

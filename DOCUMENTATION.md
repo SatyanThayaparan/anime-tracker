@@ -1,8 +1,8 @@
-# Anime Tracker — Documentation
+# Shiori (栞) — Documentation
 
 ## What this project is
 
-A Chrome extension that tracks watching time on **Netflix**, **YouTube**, and **Disney+**. It records titles (and episode labels when available), accumulates watch time with idle awareness, and shows daily/weekly/monthly stats in a popup and dashboard. All data stays local.
+**Shiori** (*bookmark*) is a Chrome extension that tracks watching time on **Netflix**, **YouTube**, and **Disney+**. It records titles (and episode labels when available), accumulates watch time with idle awareness, and shows daily/weekly/monthly stats in a popup and dashboard. All data stays local.
 
 > GitHub: [`anime-tracker`](https://github.com/SatyanThayaparan/anime-tracker)
 

@@ -1,37 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Anime Tracker">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Shiori">
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#cfe6f0"/>
-      <stop offset="55%" stop-color="#e7f2f6"/>
-      <stop offset="100%" stop-color="#d7e8c9"/>
+      <stop offset="50%" stop-color="#eaf3f6"/>
+      <stop offset="100%" stop-color="#d8e7cb"/>
     </linearGradient>
-    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#a98467"/>
-      <stop offset="100%" stop-color="#7a5a42"/>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff8ee"/>
+      <stop offset="100%" stop-color="#f0e0c8"/>
     </linearGradient>
-    <radialGradient id="glow" cx="70%" cy="72%" r="35%">
-      <stop offset="0%" stop-color="#f0c36a" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#f0c36a" stop-opacity="0"/>
-    </radialGradient>
+    <linearGradient id="cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c04028"/>
+      <stop offset="100%" stop-color="#8f2e1c"/>
+    </linearGradient>
   </defs>
-  <!-- soft badge -->
+
+  <!-- soft circular badge -->
   <circle cx="64" cy="64" r="60" fill="url(#sky)"/>
-  <circle cx="64" cy="64" r="60" fill="none" stroke="#3f5f4e" stroke-opacity="0.12" stroke-width="2"/>
+  <circle cx="64" cy="64" r="60" fill="none" stroke="#3f5f4e" stroke-opacity="0.14" stroke-width="2"/>
+
   <!-- distant hills -->
-  <path d="M18 86 C34 70 48 74 64 80 C80 74 96 66 110 84 L110 104 L18 104 Z" fill="#6f8f78" opacity="0.55"/>
-  <path d="M22 94 C40 82 54 86 68 92 C84 84 98 80 108 94 L108 104 L22 104 Z" fill="#3f5f4e" opacity="0.45"/>
-  <!-- window frame -->
-  <rect x="34" y="30" width="60" height="68" rx="8" fill="url(#wood)"/>
-  <rect x="40" y="36" width="48" height="56" rx="4" fill="#eaf4f8"/>
-  <!-- inner landscape -->
-  <path d="M40 72 C50 60 58 62 64 66 C72 60 80 58 88 70 L88 92 L40 92 Z" fill="#7ea089"/>
-  <path d="M40 80 C52 72 60 74 68 78 C76 72 84 72 88 80 L88 92 L40 92 Z" fill="#3f5f4e"/>
-  <circle cx="78" cy="48" r="6" fill="#f4d7a1" opacity="0.85"/>
-  <circle cx="64" cy="78" r="18" fill="url(#glow)"/>
-  <!-- mullion -->
-  <rect x="62" y="36" width="4" height="56" fill="#7a5a42" opacity="0.55"/>
-  <rect x="40" y="62" width="48" height="4" fill="#7a5a42" opacity="0.55"/>
-  <!-- rust leaf accent (10%) -->
-  <path d="M92 28 C98 22 108 24 110 32 C104 36 96 36 92 28 Z" fill="#c04028"/>
-  <path d="M96 30 L104 34" stroke="#7a2a1c" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M14 90 C32 74 48 78 64 84 C82 76 98 70 114 88 L114 112 L14 112 Z" fill="#6f8f78" opacity="0.5"/>
+  <path d="M18 98 C38 86 52 90 68 96 C86 88 100 86 110 98 L110 112 L18 112 Z" fill="#3f5f4e" opacity="0.42"/>
+
+  <!-- paper page behind bookmark -->
+  <rect x="38" y="28" width="52" height="68" rx="4" fill="#f7f1e6" stroke="#a98467" stroke-width="2"/>
+  <path d="M44 40 H84 M44 50 H78 M44 60 H82 M44 70 H72" stroke="#3f5f4e" stroke-opacity="0.18" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- shiori ribbon bookmark -->
+  <path d="M70 24 L86 24 L86 78 L78 70 L70 78 Z" fill="url(#ribbon)" stroke="#a98467" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M74 30 H82 M74 38 H82" stroke="#c04028" stroke-opacity="0.55" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- rust tassel cord -->
+  <path d="M78 24 C84 18 92 20 94 28 C90 34 84 36 78 32" fill="none" stroke="url(#cord)" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="94" cy="30" r="3.2" fill="#c04028"/>
 </svg>

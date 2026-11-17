@@ -7,7 +7,7 @@
       chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
       window.close();
     } catch (error) {
-      console.error('[Anime Tracker] open dashboard failed', error);
+      console.error('[Shiori] open dashboard failed', error);
     }
   }
 

@@ -149,7 +149,7 @@ async function initializeStorage() {
     const result = await migrateWatchData(SCHEMA_VERSION);
     if (result.migrated) {
       console.log(
-        `[Anime Tracker] Migrated storage to v${SCHEMA_VERSION}; fixed ${result.fixedShows} show keys`
+        `[Shiori] Migrated storage to v${SCHEMA_VERSION}; fixed ${result.fixedShows} show keys`
       );
     } else if (!data.meta) {
       await chrome.storage.local.set({
@@ -160,7 +160,7 @@ async function initializeStorage() {
       });
     }
   } catch (error) {
-    console.error('[Anime Tracker] migration failed', error);
+    console.error('[Shiori] migration failed', error);
   }
 }
 
@@ -213,12 +213,12 @@ async function injectIntoOpenWatchTabs() {
         try {
           await injectIntoTab(tab.id);
         } catch (error) {
-          console.debug('[Anime Tracker] inject skipped', tab.id, error?.message);
+          console.debug('[Shiori] inject skipped', tab.id, error?.message);
         }
       })
     );
   } catch (error) {
-    console.error('[Anime Tracker] injectIntoOpenWatchTabs failed', error);
+    console.error('[Shiori] injectIntoOpenWatchTabs failed', error);
   }
 }
 
@@ -254,7 +254,7 @@ async function getCurrentTab() {
       await startTrackingTab(tab.id, tab.url);
     }
   } catch (error) {
-    console.error('[Anime Tracker] getCurrentTab failed', error);
+    console.error('[Shiori] getCurrentTab failed', error);
   }
 }
 
@@ -306,7 +306,7 @@ async function ensureContentOnWatchTab(tabId, url) {
   try {
     await injectIntoTab(tabId);
   } catch (error) {
-    console.debug('[Anime Tracker] ensureContent skipped', tabId, error?.message);
+    console.debug('[Shiori] ensureContent skipped', tabId, error?.message);
   }
 }
 
@@ -318,7 +318,7 @@ async function handleTabActivated(activeInfo) {
       await ensureContentOnWatchTab(tab.id, tab.url);
     }
   } catch (error) {
-    console.error('[Anime Tracker] tab activate failed', error);
+    console.error('[Shiori] tab activate failed', error);
   }
 }
 
@@ -486,7 +486,7 @@ function handleMessage(message, sender, sendResponse) {
           );
         }
       } catch (error) {
-        console.error('[Anime Tracker] GET_TRACKING_STATE enrich failed', error);
+        console.error('[Shiori] GET_TRACKING_STATE enrich failed', error);
       }
       return {
         tracking: currentTracking,
@@ -500,7 +500,7 @@ function handleMessage(message, sender, sendResponse) {
     respond()
       .then((payload) => sendResponse(payload))
       .catch((error) => {
-        console.error('[Anime Tracker] GET_TRACKING_STATE failed', error);
+        console.error('[Shiori] GET_TRACKING_STATE failed', error);
         sendResponse({
           tracking: currentTracking,
           debug: { lastHeartbeatAt, error: String(error) },
@@ -703,7 +703,7 @@ async function saveCurrentSession() {
 
     currentTracking.startTime = now;
   } catch (error) {
-    console.error('[Anime Tracker] save failed', error);
+    console.error('[Shiori] save failed', error);
   }
 }
 

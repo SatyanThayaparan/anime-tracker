@@ -60,7 +60,7 @@
   try {
     shows = await import(chrome.runtime.getURL('utils/shows.js'));
   } catch (error) {
-    console.error('[Anime Tracker] Failed to load shows.js', error);
+    console.error('[Shiori] Failed to load shows.js', error);
     return;
   }
 
@@ -238,7 +238,7 @@
       );
       lastHeartbeatTime = now;
     } catch (error) {
-      console.debug('[Anime Tracker] heartbeat failed', error);
+      console.debug('[Shiori] heartbeat failed', error);
       try {
         globalThis.__ANIME_TRACKER_STOP__?.();
       } catch {

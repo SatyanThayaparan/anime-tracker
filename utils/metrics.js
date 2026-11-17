@@ -1,5 +1,5 @@
 /**
- * Derived insights for Anime Tracker dashboards.
+ * Derived insights for Shiori dashboards.
  */
 
 import { formatTime, getDateKey, getDateRange } from './storage.js';
