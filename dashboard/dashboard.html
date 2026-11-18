@@ -29,6 +29,10 @@
           <span class="nav-icon">📺</span>
           All Shows
         </a>
+        <a href="#" class="nav-item" data-tab="wrapped">
+          <span class="nav-icon">🎀</span>
+          Wrapped
+        </a>
         <a href="#" class="nav-item" data-tab="settings">
           <span class="nav-icon">⚙️</span>
           Settings
@@ -44,10 +48,23 @@
           <h1 id="pageTitle">Overview</h1>
         </div>
         <div class="header-right">
-          <div class="time-range-selector">
-            <button class="time-btn active" data-range="1">Today</button>
-            <button class="time-btn" data-range="7">7 Days</button>
-            <button class="time-btn" data-range="30">30 Days</button>
+          <div class="time-range-selector" id="timeRangeSelector">
+            <button class="time-btn active" data-range="1" type="button">Today</button>
+            <button class="time-btn" data-range="7" type="button">7 Days</button>
+            <button class="time-btn" data-range="30" type="button">30 Days</button>
+            <button class="time-btn" data-range="all" type="button">All</button>
+            <button class="time-btn" data-range="custom" type="button">Custom</button>
+          </div>
+          <div class="custom-range" id="customRangePanel" hidden>
+            <label class="custom-range-field">
+              <span>From</span>
+              <input type="date" id="rangeFrom" />
+            </label>
+            <label class="custom-range-field">
+              <span>To</span>
+              <input type="date" id="rangeTo" />
+            </label>
+            <button class="btn btn-secondary btn-sm" id="applyCustomRange" type="button">Apply</button>
           </div>
         </div>
       </header>
@@ -162,10 +179,15 @@
               <button class="btn btn-secondary" id="exportDataBtn" type="button">
                 Export Data
               </button>
+              <button class="btn btn-secondary" id="importDataBtn" type="button">
+                Import Data
+              </button>
+              <input type="file" id="importDataInput" accept="application/json,.json" hidden>
               <button class="btn btn-danger" id="clearDataBtn" type="button">
                 Clear All Data
               </button>
             </div>
+            <p class="settings-import-note" id="importStatus" hidden></p>
           </section>
 
           <section class="settings-panel settings-panel-wide">
@@ -193,6 +215,29 @@
             <p class="settings-version" id="settingsVersion">v—</p>
           </section>
         </div>
+      </div>
+
+      <!-- Wrapped Tab -->
+      <div id="wrappedTab" class="tab-content wrapped-layout">
+        <div class="wrapped-controls">
+          <div class="time-range-selector wrapped-mode">
+            <button class="time-btn active" data-wrap="month" type="button">Month</button>
+            <button class="time-btn" data-wrap="year" type="button">Year</button>
+          </div>
+          <div class="wrapped-pickers">
+            <label class="custom-range-field" id="wrappedMonthField">
+              <span>Month</span>
+              <select id="wrappedMonth"></select>
+            </label>
+            <label class="custom-range-field">
+              <span>Year</span>
+              <select id="wrappedYear"></select>
+            </label>
+          </div>
+        </div>
+        <article class="wrapped-card" id="wrappedCard" aria-live="polite">
+          <p class="loading">Loading wrapped…</p>
+        </article>
       </div>
     </main>
   </div>

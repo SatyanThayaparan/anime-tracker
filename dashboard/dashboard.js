@@ -3,19 +3,25 @@ import {
   getDataForDate,
   getDataForDates,
   getDateKey,
+  getDateKeysBetween,
   getDateRange,
+  getMonthDateKeys,
+  getYearDateKeys,
   getTotalTime, 
   formatTime,
   exportData,
+  importData,
   clearAllData,
   getCompletedEpisodes,
   getShowTags,
   setShowTags,
   getSettings,
   saveSettings,
+  listStoredDateKeys,
 } from '../utils/storage.js';
 import {
   SUGGESTED_TAGS,
+  buildWrappedRecap,
   computeInsights,
   countFinishedEpisodes,
   dailyTotalsFromRaw,
@@ -32,7 +38,8 @@ import {
 } from '../utils/anilist.js';
 
 // State
-let currentRange = 1;
+/** @type {{ mode: 'days'|'all'|'custom', days?: number, from?: string, to?: string }} */
+let rangeSpec = { mode: 'days', days: 1 };
 let currentData = null;
 let longRangeData = null;
 let heatmapDaily = {};
@@ -46,15 +53,31 @@ let dailyChart = null;
 let platformChart = null;
 let insightPrimeChart = null;
 let openInsightKey = null;
+let wrapMode = 'month';
+let wrapYear = new Date().getFullYear();
+let wrapMonth = new Date().getMonth() + 1;
 
 const CONTINUE_RANGE_DAYS = 90;
 const HEATMAP_DAYS = 371;
+
+async function resolveRangeDateKeys(spec = rangeSpec) {
+  if (spec.mode === 'all') return listStoredDateKeys();
+  if (spec.mode === 'custom' && spec.from && spec.to) {
+    return getDateKeysBetween(spec.from, spec.to);
+  }
+  return getDateRange(spec.days || 1);
+}
+
+function isMultiDayRange(dateKeys = currentData?.dateKeys) {
+  return (dateKeys?.length || 0) > 1;
+}
 
 /**
  * Initialize dashboard
  */
 async function initDashboard() {
   setupEventListeners();
+  initWrappedPickers();
   window.addEventListener('resize', resizeVisibleCharts);
   await loadSettingsUi();
   await loadData();
@@ -72,14 +95,56 @@ function setupEventListeners() {
     });
   });
 
-  // Time range selector
-  document.querySelectorAll('.time-btn').forEach(btn => {
+  // Time range selector (header only — not Wrapped toggles)
+  document.querySelectorAll('#timeRangeSelector .time-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('#timeRangeSelector .time-btn').forEach((b) =>
+        b.classList.remove('active')
+      );
       btn.classList.add('active');
-      currentRange = parseInt(btn.dataset.range);
+
+      const value = btn.dataset.range;
+      const customPanel = document.getElementById('customRangePanel');
+
+      if (value === 'custom') {
+        customPanel.hidden = false;
+        const today = getDateKey();
+        const fromEl = document.getElementById('rangeFrom');
+        const toEl = document.getElementById('rangeTo');
+        if (fromEl && !fromEl.value) {
+          const monthAgo = new Date();
+          monthAgo.setDate(monthAgo.getDate() - 29);
+          fromEl.value = getDateKey(monthAgo);
+        }
+        if (toEl && !toEl.value) toEl.value = today;
+        rangeSpec = {
+          mode: 'custom',
+          from: fromEl?.value || today,
+          to: toEl?.value || today,
+        };
+        return;
+      }
+
+      if (customPanel) customPanel.hidden = true;
+
+      if (value === 'all') {
+        rangeSpec = { mode: 'all' };
+      } else {
+        rangeSpec = { mode: 'days', days: parseInt(value, 10) || 1 };
+      }
       loadData();
     });
+  });
+
+  document.getElementById('applyCustomRange')?.addEventListener('click', () => {
+    const from = document.getElementById('rangeFrom')?.value;
+    const to = document.getElementById('rangeTo')?.value;
+    if (!from || !to) {
+      alert('Pick both a start and end date.');
+      return;
+    }
+    rangeSpec = { mode: 'custom', from, to };
+    loadData();
   });
 
   // Show search
@@ -90,11 +155,35 @@ function setupEventListeners() {
     });
   }
 
-  // Export data button
+  // Export / import / clear
   document.getElementById('exportDataBtn').addEventListener('click', handleExportData);
-
-  // Clear data button
+  document.getElementById('importDataBtn')?.addEventListener('click', () => {
+    document.getElementById('importDataInput')?.click();
+  });
+  document.getElementById('importDataInput')?.addEventListener('change', handleImportData);
   document.getElementById('clearDataBtn').addEventListener('click', handleClearData);
+
+  document.querySelectorAll('.wrapped-mode .time-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.wrapped-mode .time-btn').forEach((b) =>
+        b.classList.remove('active')
+      );
+      btn.classList.add('active');
+      wrapMode = btn.dataset.wrap === 'year' ? 'year' : 'month';
+      const monthField = document.getElementById('wrappedMonthField');
+      if (monthField) monthField.hidden = wrapMode === 'year';
+      renderWrapped();
+    });
+  });
+
+  document.getElementById('wrappedMonth')?.addEventListener('change', (e) => {
+    wrapMonth = Number(e.target.value) || wrapMonth;
+    renderWrapped();
+  });
+  document.getElementById('wrappedYear')?.addEventListener('change', (e) => {
+    wrapYear = Number(e.target.value) || wrapYear;
+    renderWrapped();
+  });
 
   document.getElementById('detailClose')?.addEventListener('click', closeShowDetail);
   document.getElementById('detailOverlay')?.addEventListener('click', closeShowDetail);
@@ -182,10 +271,18 @@ function switchTab(tabId) {
     overview: 'Overview',
     insights: 'Insights',
     shows: 'All Shows',
-    settings: 'Settings'
+    wrapped: 'Wrapped',
+    settings: 'Settings',
   };
   document.getElementById('pageTitle').textContent = titles[tabId] || 'Dashboard';
+
+  const headerRight = document.querySelector('.header-right');
+  if (headerRight) {
+    headerRight.hidden = tabId === 'wrapped' || tabId === 'settings';
+  }
+
   if (tabId === 'insights') renderInsights();
+  if (tabId === 'wrapped') renderWrapped();
 }
 
 /**
@@ -252,7 +349,8 @@ function formatProgressLabel({ finished, total }) {
 
 async function loadData() {
   try {
-    currentData = await getAggregatedData(currentRange);
+    const dateKeys = await resolveRangeDateKeys(rangeSpec);
+    currentData = await getAggregatedData({ dateKeys });
     longRangeData = await getAggregatedData(CONTINUE_RANGE_DAYS);
     showTags = await getShowTags();
     animeCatalog = await getAnimeCatalog();
@@ -275,13 +373,16 @@ async function loadData() {
     updateContinueWatching();
     updateAllShowsTable();
     renderInsights();
+    if (document.getElementById('wrappedTab')?.classList.contains('active')) {
+      renderWrapped();
+    }
 
-    // Same chart slot: hourly for today, daily trend for multi-day (keeps one page).
+    // Same chart slot: hourly for single day, daily trend for multi-day.
     const title = document.getElementById('activityChartTitle');
     const hourlyWrap = document.getElementById('hourlyChartWrap');
     const dailyWrap = document.getElementById('dailyChartWrap');
     const activityHint = document.getElementById('activityChartHint');
-    if (currentRange > 1) {
+    if (isMultiDayRange(dateKeys)) {
       if (title) title.textContent = 'Daily Trend';
       if (activityHint) activityHint.textContent = 'Click a day to see shows watched';
       if (hourlyWrap) hourlyWrap.hidden = true;
@@ -320,7 +421,8 @@ function updateStats() {
  */
 function updateCharts() {
   updateShowChart();
-  if (currentRange <= 1) updateHourlyChart();
+  if (isMultiDayRange()) updateDailyChart();
+  else updateHourlyChart();
 }
 
 function resizeVisibleCharts() {
@@ -1666,7 +1768,7 @@ async function handleExportData() {
     
     const a = document.createElement('a');
     a.href = url;
-    a.download = `website-usage-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `shiori-export-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1674,6 +1776,44 @@ async function handleExportData() {
   } catch (error) {
     console.error('Error exporting data:', error);
     alert('Failed to export data');
+  }
+}
+
+function setImportStatus(message, isError = false) {
+  const el = document.getElementById('importStatus');
+  if (!el) return;
+  el.hidden = !message;
+  el.textContent = message || '';
+  el.classList.toggle('is-error', Boolean(isError));
+}
+
+async function handleImportData(event) {
+  const file = event.target?.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+
+  if (
+    !confirm(
+      'Import replaces all Shiori data on this device with the file contents. Continue?'
+    )
+  ) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const result = await importData(payload);
+    setImportStatus(
+      `Imported ${result.importedDays} day${result.importedDays === 1 ? '' : 's'} of history.`
+    );
+    await loadSettingsUi();
+    await loadData();
+    renderWrapped();
+  } catch (error) {
+    console.error('Error importing data:', error);
+    setImportStatus(error?.message || 'Failed to import data', true);
+    alert(error?.message || 'Failed to import data');
   }
 }
 
@@ -1685,11 +1825,124 @@ async function handleClearData() {
     try {
       await clearAllData();
       await loadData();
+      renderWrapped();
       alert('All data has been cleared');
     } catch (error) {
       console.error('Error clearing data:', error);
       alert('Failed to clear data');
     }
+  }
+}
+
+function initWrappedPickers() {
+  const monthEl = document.getElementById('wrappedMonth');
+  const yearEl = document.getElementById('wrappedYear');
+  if (!monthEl || !yearEl) return;
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+  monthEl.innerHTML = monthNames
+    .map(
+      (name, index) =>
+        `<option value="${index + 1}" ${index + 1 === wrapMonth ? 'selected' : ''}>${name}</option>`
+    )
+    .join('');
+
+  const thisYear = new Date().getFullYear();
+  const years = [];
+  for (let y = thisYear; y >= thisYear - 6; y -= 1) years.push(y);
+  yearEl.innerHTML = years
+    .map((y) => `<option value="${y}" ${y === wrapYear ? 'selected' : ''}>${y}</option>`)
+    .join('');
+
+  const monthField = document.getElementById('wrappedMonthField');
+  if (monthField) monthField.hidden = wrapMode === 'year';
+}
+
+async function renderWrapped() {
+  const card = document.getElementById('wrappedCard');
+  if (!card) return;
+
+  const dateKeys =
+    wrapMode === 'year'
+      ? getYearDateKeys(wrapYear)
+      : getMonthDateKeys(wrapYear, wrapMonth);
+
+  const label =
+    wrapMode === 'year'
+      ? String(wrapYear)
+      : new Date(wrapYear, wrapMonth - 1, 1).toLocaleString(undefined, {
+          month: 'long',
+          year: 'numeric',
+        });
+
+  try {
+    const aggregated = await getAggregatedData({ dateKeys });
+    const insights = computeInsights(aggregated, { showTags });
+    const recap = buildWrappedRecap(aggregated, insights, { label });
+
+    if (!recap.totalTime && !recap.showCount) {
+      card.innerHTML = `
+        <div class="wrapped-empty">
+          <p class="wrapped-kicker">Shiori Wrapped</p>
+          <h2>${escapeHtml(label)}</h2>
+          <p>No watch time in this period yet.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const topList = recap.topShows
+      .map(
+        (show, index) => `
+        <li>
+          <span class="wrapped-rank">${index + 1}</span>
+          <span class="wrapped-show-name">${escapeHtml(show.showName)}</span>
+          <span class="wrapped-show-time">${formatTime(show.totalTime, true)}</span>
+        </li>`
+      )
+      .join('');
+
+    card.innerHTML = `
+      <div class="wrapped-hero">
+        <p class="wrapped-kicker">Shiori Wrapped</p>
+        <h2>${escapeHtml(label)}</h2>
+        <p class="wrapped-lede">A bookmark of what you watched</p>
+      </div>
+      <div class="wrapped-stats">
+        <div><span>Time</span><strong>${formatTime(recap.totalTime, true)}</strong></div>
+        <div><span>Episodes</span><strong>${recap.episodes}</strong></div>
+        <div><span>Shows</span><strong>${recap.showCount}</strong></div>
+        <div><span>Active days</span><strong>${recap.activeDays}</strong></div>
+      </div>
+      <div class="wrapped-highlights">
+        <div>
+          <span class="wrapped-label">Best streak</span>
+          <strong>${recap.streakBest} day${recap.streakBest === 1 ? '' : 's'}</strong>
+        </div>
+        <div>
+          <span class="wrapped-label">Prime hours</span>
+          <strong>${escapeHtml(recap.primeLabel)}</strong>
+        </div>
+        <div>
+          <span class="wrapped-label">Top platform</span>
+          <strong>${escapeHtml(recap.topPlatform || '—')}</strong>
+        </div>
+        <div>
+          <span class="wrapped-label">Top genre</span>
+          <strong>${escapeHtml(recap.topGenre || 'Add tags')}</strong>
+        </div>
+      </div>
+      <div class="wrapped-tops">
+        <h3>Top shows</h3>
+        <ol class="wrapped-top-list">${topList || '<li>No shows yet</li>'}</ol>
+      </div>
+    `;
+  } catch (error) {
+    console.error('Wrapped render failed:', error);
+    card.innerHTML = `<p class="empty-state">Could not build this wrapped card.</p>`;
   }
 }
 

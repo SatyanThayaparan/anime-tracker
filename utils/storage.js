@@ -42,6 +42,71 @@ export function getDateRange(days) {
   return dates;
 }
 
+export function isDateStorageKey(key) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(key || ''));
+}
+
+function parseDateKey(dateKey) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ''));
+  if (!match) return null;
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    12,
+    0,
+    0
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Inclusive list of YYYY-MM-DD keys from fromKey → toKey.
+ */
+export function getDateKeysBetween(fromKey, toKey) {
+  const start = parseDateKey(fromKey);
+  const end = parseDateKey(toKey);
+  if (!start || !end) return [];
+
+  const from = start <= end ? start : end;
+  const to = start <= end ? end : start;
+  const keys = [];
+  const cursor = new Date(from);
+
+  while (cursor <= to) {
+    keys.push(getDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return keys;
+}
+
+/** Calendar month keys (month is 1–12). */
+export function getMonthDateKeys(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) return [];
+  const start = `${y}-${String(m).padStart(2, '0')}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const end = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return getDateKeysBetween(start, end);
+}
+
+/** Calendar year keys. */
+export function getYearDateKeys(year) {
+  const y = Number(year);
+  if (!y) return [];
+  return getDateKeysBetween(`${y}-01-01`, `${y}-12-31`);
+}
+
+/**
+ * All stored watch-day keys, ascending.
+ * @returns {Promise<string[]>}
+ */
+export async function listStoredDateKeys() {
+  const allData = await chrome.storage.local.get(null);
+  return Object.keys(allData).filter(isDateStorageKey).sort();
+}
+
 /**
  * Get today's usage data
  * @returns {Promise<Object>}
@@ -73,14 +138,15 @@ export async function getDataForDates(dateKeys) {
 }
 
 /**
- * Get aggregated data for a date range
- * @param {number} days - Number of days to aggregate
+ * Aggregate raw day records into dashboard shape.
+ * @param {string[]} dateKeys
+ * @param {Object} [rawData]
  * @returns {Promise<Object>}
  */
-export async function getAggregatedData(days) {
-  const dateKeys = getDateRange(days);
-  const rawData = await getDataForDates(dateKeys);
-  
+export async function aggregateDateKeys(dateKeys = [], rawData = null) {
+  const keys = Array.isArray(dateKeys) ? dateKeys : [];
+  const data = rawData || (await getDataForDates(keys));
+
   const aggregated = {
     shows: {},
     daily: {},
@@ -88,30 +154,28 @@ export async function getAggregatedData(days) {
     stats: {
       totalTime: 0,
       episodesWatched: 0,
-      showsActive: 0
-    }
+      showsActive: 0,
+    },
+    dateKeys: keys.slice(),
   };
-  
-  // Initialize hourly buckets
+
   for (let i = 0; i < 24; i++) {
     aggregated.hourly[i.toString().padStart(2, '0')] = 0;
   }
-  
+
   const allShows = new Set();
   let totalEpisodes = 0;
-  
-  for (const dateKey of dateKeys) {
-    const dayData = rawData[dateKey];
+
+  for (const dateKey of keys) {
+    const dayData = data[dateKey];
     if (!dayData) continue;
-    
-    // Store daily totals
+
     let dayTotal = 0;
-    
-    // Aggregate show data
+
     if (dayData.shows) {
       for (const [showName, showData] of Object.entries(dayData.shows)) {
         allShows.add(showName);
-        
+
         if (!aggregated.shows[showName]) {
           aggregated.shows[showName] = {
             site: showData.site,
@@ -122,24 +186,23 @@ export async function getAggregatedData(days) {
             sessions: 0,
             episodes: {},
             hourly: {},
-            lastWatched: 0
+            lastWatched: 0,
           };
         }
-        
+
         aggregated.shows[showName].totalTime += showData.totalTime || 0;
         aggregated.shows[showName].activeTime += showData.activeTime || 0;
         aggregated.shows[showName].pausedTime += showData.pausedTime || 0;
         aggregated.shows[showName].sessions += showData.sessions || 0;
         if (showData.site) aggregated.shows[showName].site = showData.site;
         if (showData.platform) aggregated.shows[showName].platform = showData.platform;
-        
+
         if (showData.lastWatched > aggregated.shows[showName].lastWatched) {
           aggregated.shows[showName].lastWatched = showData.lastWatched;
         }
-        
+
         dayTotal += showData.totalTime || 0;
-        
-        // Aggregate episode data
+
         if (showData.episodes) {
           for (const [episodeNum, episodeData] of Object.entries(showData.episodes)) {
             if (!aggregated.shows[showName].episodes[episodeNum]) {
@@ -153,10 +216,10 @@ export async function getAggregatedData(days) {
                 sessions: 0,
                 rewatches: 0,
                 seasonNumber: episodeData.seasonNumber || 1,
-                label: episodeData.label || episodeNum
+                label: episodeData.label || episodeNum,
               };
             }
-            
+
             const aggEpisode = aggregated.shows[showName].episodes[episodeNum];
             aggEpisode.time += episodeData.time || 0;
             aggEpisode.sessions += episodeData.sessions || 0;
@@ -165,39 +228,35 @@ export async function getAggregatedData(days) {
               aggEpisode.seasonNumber = episodeData.seasonNumber;
             }
             if (episodeData.label) aggEpisode.label = episodeData.label;
-            
-            // Update progress - use maximum progress seen
+
             if (episodeData.progress !== undefined && episodeData.progress > aggEpisode.progress) {
               aggEpisode.progress = episodeData.progress;
             }
-            
-            // Update duration - use maximum duration seen (most accurate)
+
             if (episodeData.duration > 0) {
               if (aggEpisode.duration === 0 || episodeData.duration > aggEpisode.duration) {
                 aggEpisode.duration = episodeData.duration;
               }
             }
-            
-            // Update current time - use maximum current time seen
+
             if (episodeData.currentTime > aggEpisode.currentTime) {
               aggEpisode.currentTime = episodeData.currentTime;
             }
-            
+
             if (episodeData.completed) {
               aggEpisode.completed = true;
             }
-            
+
             if (episodeData.timestamp > aggEpisode.timestamp) {
               aggEpisode.timestamp = episodeData.timestamp;
             }
-            
+
             if (episodeData.completed) {
               totalEpisodes++;
             }
           }
         }
-        
-        // Aggregate hourly data (global + per show for detail drawer)
+
         if (showData.hourly) {
           for (const [hour, time] of Object.entries(showData.hourly)) {
             aggregated.hourly[hour] = (aggregated.hourly[hour] || 0) + time;
@@ -207,17 +266,39 @@ export async function getAggregatedData(days) {
         }
       }
     }
-    
+
     aggregated.daily[dateKey] = dayTotal;
   }
-  
-  // Calculate aggregated stats
-  aggregated.stats.totalTime = Object.values(aggregated.shows)
-    .reduce((sum, show) => sum + (show.totalTime || 0), 0);
+
+  aggregated.stats.totalTime = Object.values(aggregated.shows).reduce(
+    (sum, show) => sum + (show.totalTime || 0),
+    0
+  );
   aggregated.stats.episodesWatched = totalEpisodes;
   aggregated.stats.showsActive = allShows.size;
-  
+
   return aggregated;
+}
+
+/**
+ * Get aggregated data for a date range.
+ * @param {number|'all'|{ dateKeys?: string[], mode?: 'all' }} daysOrOpts
+ * @returns {Promise<Object>}
+ */
+export async function getAggregatedData(daysOrOpts = 1) {
+  let dateKeys = [];
+
+  if (typeof daysOrOpts === 'number') {
+    dateKeys = getDateRange(daysOrOpts);
+  } else if (daysOrOpts === 'all' || daysOrOpts?.mode === 'all') {
+    dateKeys = await listStoredDateKeys();
+  } else if (Array.isArray(daysOrOpts?.dateKeys)) {
+    dateKeys = daysOrOpts.dateKeys;
+  } else {
+    dateKeys = getDateRange(1);
+  }
+
+  return aggregateDateKeys(dateKeys);
 }
 
 /**
@@ -622,6 +703,89 @@ export async function exportData() {
     schemaVersion: allData.meta?.schemaVersion || CURRENT_SCHEMA_VERSION,
     exportDate: new Date().toISOString(),
     data: allData,
+  };
+}
+
+/**
+ * Validate a Shiori export payload.
+ * @param {any} payload
+ * @returns {{ ok: boolean, error?: string, data?: Object, schemaVersion?: number }}
+ */
+export function validateImportPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, error: 'File is not a Shiori export object.' };
+  }
+
+  // Prefer wrapped export { schemaVersion, data }; also accept raw storage dump.
+  const data =
+    payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+      ? payload.data
+      : payload;
+
+  const keys = Object.keys(data);
+  if (!keys.length) {
+    return { ok: false, error: 'Export file has no data.' };
+  }
+
+  const dateKeys = keys.filter(isDateStorageKey);
+  const hasKnown =
+    dateKeys.length > 0 ||
+    data.meta != null ||
+    data.settings != null ||
+    data.showTags != null ||
+    data.animeCatalog != null;
+
+  if (!hasKnown) {
+    return { ok: false, error: 'File does not look like a Shiori export.' };
+  }
+
+  for (const key of dateKeys) {
+    const day = data[key];
+    if (!day || typeof day !== 'object' || Array.isArray(day)) {
+      return { ok: false, error: `Invalid day record for ${key}.` };
+    }
+  }
+
+  return {
+    ok: true,
+    data,
+    schemaVersion:
+      Number(payload.schemaVersion) ||
+      Number(data.meta?.schemaVersion) ||
+      CURRENT_SCHEMA_VERSION,
+  };
+}
+
+/**
+ * Replace local storage with an export (keeps nothing from before).
+ * Runs schema migration afterward.
+ * @param {any} payload
+ * @returns {Promise<{ importedDays: number, schemaVersion: number }>}
+ */
+export async function importData(payload) {
+  const validated = validateImportPayload(payload);
+  if (!validated.ok) {
+    throw new Error(validated.error || 'Invalid import file');
+  }
+
+  const next = { ...validated.data };
+  if (!next.meta || typeof next.meta !== 'object') {
+    next.meta = {};
+  }
+  next.meta = {
+    ...next.meta,
+    schemaVersion: validated.schemaVersion || CURRENT_SCHEMA_VERSION,
+    importedAt: new Date().toISOString(),
+  };
+
+  await chrome.storage.local.clear();
+  await chrome.storage.local.set(next);
+  await migrateWatchData(CURRENT_SCHEMA_VERSION);
+
+  const importedDays = Object.keys(next).filter(isDateStorageKey).length;
+  return {
+    importedDays,
+    schemaVersion: next.meta.schemaVersion,
   };
 }
 

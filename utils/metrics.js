@@ -3,7 +3,12 @@
  */
 
 import { isUiNoiseTitle, isUsableEpisodeRef } from './normalize.js';
-import { formatTime, getDateKey, getDateRange } from './storage.js';
+import {
+  formatTime,
+  getDateKey,
+  getDateRange,
+  getTopShows,
+} from './storage.js';
 
 function isRealEpisodeRow(row) {
   if (!row?.showName || isUiNoiseTitle(row.showName)) return false;
@@ -412,6 +417,44 @@ export function countFinishedEpisodes(episodes = {}) {
  * @param {Object} shows - Aggregated shows map
  * @param {{ anilistTotalFor?: (showName: string) => number|null }} [opts]
  */
+/**
+ * Compact wrapped / recap summary for a period.
+ */
+export function buildWrappedRecap(aggregated, insights, { label = '' } = {}) {
+  const shows = aggregated?.shows || {};
+  const topShows = getTopShows(shows, 5).map((show) => ({
+    showName: show.showName,
+    totalTime: show.totalTime || 0,
+    sessions: show.sessions || 0,
+  }));
+  const totalTime = aggregated?.stats?.totalTime || 0;
+  const episodes = aggregated?.stats?.episodesWatched || 0;
+  const showCount = aggregated?.stats?.showsActive || Object.keys(shows).length;
+  const sessions = Object.values(shows).reduce(
+    (sum, show) => sum + (show.sessions || 0),
+    0
+  );
+  const activeDays = Object.values(aggregated?.daily || {}).filter(
+    (ms) => (ms || 0) > 0
+  ).length;
+
+  return {
+    label,
+    totalTime,
+    episodes,
+    showCount,
+    sessions,
+    activeDays,
+    topShows,
+    streakBest: insights?.streaks?.best || 0,
+    streakCurrent: insights?.streaks?.current || 0,
+    primeLabel: insights?.primeHours?.label || '—',
+    topGenre: insights?.genreTags?.items?.[0]?.tag || null,
+    topPlatform: insights?.platformSplit?.items?.[0]?.label || null,
+    completionRate: insights?.completionRate?.value ?? null,
+  };
+}
+
 export function getContinueWatching(shows = {}, { anilistTotalFor } = {}) {
   const items = [];
 
