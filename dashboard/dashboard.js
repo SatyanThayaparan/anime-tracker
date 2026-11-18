@@ -147,6 +147,12 @@ async function loadSettingsUi() {
   const autoTag = document.getElementById('settingAutoTag');
   if (animeOnly) animeOnly.checked = Boolean(settings.animeOnlyTracking);
   if (autoTag) autoTag.checked = settings.autoTagFromAniList !== false;
+
+  const versionEl = document.getElementById('settingsVersion');
+  if (versionEl) {
+    const manifest = chrome.runtime.getManifest();
+    versionEl.textContent = `v${manifest.version}`;
+  }
 }
 
 /**
@@ -589,64 +595,99 @@ function updateTopShowsTable() {
   bindShowRowClicks(tbody);
 }
 
+function platformDisplayName(show) {
+  const raw = String(show.platform || show.site || '').toLowerCase();
+  if (raw.includes('netflix')) return 'Netflix';
+  if (raw.includes('disney')) return 'Disney+';
+  if (raw.includes('crunchyroll')) return 'Crunchyroll';
+  if (raw.includes('prime') || raw.includes('amazon')) return 'Prime Video';
+  if (raw.includes('hidive')) return 'HIDIVE';
+  if (raw.includes('hulu')) return 'Hulu';
+  return show.site || show.platform || 'Unknown';
+}
+
 /**
- * Update all shows table
+ * Update All Shows library list
  */
 function updateAllShowsTable() {
-  const tbody = document.getElementById('allShowsTable');
+  const list = document.getElementById('allShowsList');
+  const summary = document.getElementById('showsSummary');
+  if (!list) return;
+
   const shows = Object.entries(currentData.shows || {})
     .map(([showName, data]) => ({ showName, ...data }))
     .sort((a, b) => b.totalTime - a.totalTime);
 
+  const totalTime = shows.reduce((sum, show) => sum + (show.totalTime || 0), 0);
+  const totalSessions = shows.reduce((sum, show) => sum + (show.sessions || 0), 0);
+  const platforms = new Set(shows.map((show) => platformDisplayName(show)));
+
+  if (summary) {
+    summary.innerHTML =
+      shows.length === 0
+        ? `<p class="shows-summary-empty">No shows in this range yet</p>`
+        : `
+      <div class="shows-stat"><span>Shows</span><strong>${shows.length}</strong></div>
+      <div class="shows-stat"><span>Total time</span><strong>${formatTime(totalTime, true)}</strong></div>
+      <div class="shows-stat"><span>Sessions</span><strong>${totalSessions}</strong></div>
+      <div class="shows-stat"><span>Platforms</span><strong>${platforms.size}</strong></div>
+    `;
+  }
+
   if (shows.length === 0) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="5" class="empty-state">
-          <div class="empty-state-icon">📺</div>
-          <p>No shows watched in this period</p>
-        </td>
-      </tr>
+    list.innerHTML = `
+      <div class="empty-state shows-empty">
+        <div class="empty-state-icon">📺</div>
+        <p>No shows watched in this period</p>
+      </div>
     `;
     return;
   }
 
-  tbody.innerHTML = shows.map(show => {
-    const episodesCompleted = getCompletedEpisodes(show.episodes);
-    const safeName = escapeHtml(show.showName);
+  const maxTime = Math.max(1, ...shows.map((show) => show.totalTime || 0));
 
-    return `
-      <tr data-showname="${safeName}" tabindex="0" role="button" aria-label="Open details for ${safeName}">
-        <td>
-          <div class="site-cell">
-            ${renderShowPoster(show.showName)}
-            <span class="site-name">${safeName}</span>
+  list.innerHTML = shows
+    .map((show) => {
+      const episodesCompleted = getCompletedEpisodes(show.episodes);
+      const safeName = escapeHtml(show.showName);
+      const pct = Math.max(4, Math.round(((show.totalTime || 0) / maxTime) * 100));
+      const platform = escapeHtml(platformDisplayName(show));
+
+      return `
+      <button type="button" class="show-row" data-showname="${safeName}" aria-label="Open details for ${safeName}">
+        <div class="show-row-main">
+          ${renderShowPoster(show.showName)}
+          <div class="show-row-copy">
+            <span class="show-row-title">${safeName}</span>
+            <span class="show-row-meta">
+              <span class="category-badge">${platform}</span>
+              <span>${episodesCompleted} ep${episodesCompleted === 1 ? '' : 's'}</span>
+              <span>${show.sessions || 0} session${(show.sessions || 0) === 1 ? '' : 's'}</span>
+            </span>
           </div>
-        </td>
-        <td>
-          <span class="category-badge">
-            ${escapeHtml(show.site || show.platform || 'Unknown')}
-          </span>
-        </td>
-        <td>${formatTime(show.totalTime, true)}</td>
-        <td>${episodesCompleted}</td>
-        <td>${show.sessions || 0}</td>
-      </tr>
-    `;
-  }).join('');
+          <strong class="show-row-time">${formatTime(show.totalTime, true)}</strong>
+        </div>
+        <div class="show-row-bar" aria-hidden="true"><i style="width:${pct}%"></i></div>
+      </button>`;
+    })
+    .join('');
 
-  bindShowRowClicks(tbody);
+  bindShowRowClicks(list);
+
+  const search = document.getElementById('showSearch');
+  if (search?.value) filterShows(search.value);
 }
 
 /**
- * Filter shows table by search term
+ * Filter library rows by search term
  */
 function filterShows(searchTerm) {
-  const rows = document.querySelectorAll('#allShowsTable tr[data-showname]');
-  const term = searchTerm.toLowerCase();
+  const rows = document.querySelectorAll('#allShowsList .show-row[data-showname]');
+  const term = searchTerm.toLowerCase().trim();
 
-  rows.forEach(row => {
+  rows.forEach((row) => {
     const showName = row.dataset.showname.toLowerCase();
-    row.style.display = showName.includes(term) ? '' : 'none';
+    row.hidden = Boolean(term) && !showName.includes(term);
   });
 }
 
@@ -658,8 +699,8 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
-function bindShowRowClicks(tbody) {
-  tbody.querySelectorAll('tr[data-showname]').forEach((row) => {
+function bindShowRowClicks(root) {
+  root.querySelectorAll('[data-showname]').forEach((row) => {
     const open = () => openShowDetail(row.dataset.showname);
     row.addEventListener('click', open);
     row.addEventListener('keydown', (e) => {

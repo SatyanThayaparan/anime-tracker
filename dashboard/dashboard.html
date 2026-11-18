@@ -125,57 +125,84 @@
       </div>
 
       <!-- Shows Tab -->
-      <div id="showsTab" class="tab-content">
-        <div class="table-card">
-          <div class="table-header">
-            <h3>All Watched Shows</h3>
+      <div id="showsTab" class="tab-content shows-layout">
+        <div class="shows-summary" id="showsSummary" aria-live="polite"></div>
+        <div class="shows-library">
+          <div class="shows-library-head">
+            <div>
+              <h3>Library</h3>
+              <p class="shows-library-sub">Click a title for episodes, tags, and AniList match</p>
+            </div>
             <input type="text" id="showSearch" class="search-input" placeholder="Search shows...">
           </div>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Show</th>
-                <th>Site</th>
-                <th>Total Time</th>
-                <th>Episodes</th>
-                <th>Sessions</th>
-              </tr>
-            </thead>
-            <tbody id="allShowsTable">
-              <tr>
-                <td colspan="5" class="loading">Loading...</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="shows-list" id="allShowsList">
+            <p class="loading">Loading...</p>
+          </div>
         </div>
       </div>
 
       <!-- Settings Tab -->
-      <div id="settingsTab" class="tab-content">
-        <div class="settings-section">
-          <h3>Anime verification</h3>
-          <p class="settings-description">
-            Titles are checked against AniList. Cache results locally and optionally ignore non-anime.
-          </p>
-          <label class="settings-toggle">
-            <input type="checkbox" id="settingAnimeOnly">
-            <span>Only track titles verified as anime</span>
-          </label>
-          <label class="settings-toggle">
-            <input type="checkbox" id="settingAutoTag" checked>
-            <span>Auto-fill genre tags from AniList matches</span>
-          </label>
-        </div>
-        <div class="settings-section">
-          <h3>Data Management</h3>
-          <div class="settings-actions">
-            <button class="btn btn-secondary" id="exportDataBtn">
-              Export Data
-            </button>
-            <button class="btn btn-danger" id="clearDataBtn">
-              Clear All Data
-            </button>
-          </div>
+      <div id="settingsTab" class="tab-content settings-layout">
+        <div class="settings-grid">
+          <section class="settings-panel">
+            <h3>Anime verification</h3>
+            <p class="settings-description">
+              Titles are checked against AniList. Results stay on this device.
+            </p>
+            <label class="settings-toggle">
+              <input type="checkbox" id="settingAnimeOnly">
+              <span>Only track titles verified as anime</span>
+            </label>
+            <label class="settings-toggle">
+              <input type="checkbox" id="settingAutoTag" checked>
+              <span>Auto-fill genre tags from AniList matches</span>
+            </label>
+          </section>
+
+          <section class="settings-panel">
+            <h3>Data on this device</h3>
+            <p class="settings-description">
+              Watch history never leaves your browser unless you export it.
+            </p>
+            <ul class="settings-bullets">
+              <li>Stored locally via Chrome storage</li>
+              <li>Survives extension updates</li>
+              <li>Cleared only if you uninstall or hit Clear</li>
+            </ul>
+            <div class="settings-actions">
+              <button class="btn btn-secondary" id="exportDataBtn" type="button">
+                Export Data
+              </button>
+              <button class="btn btn-danger" id="clearDataBtn" type="button">
+                Clear All Data
+              </button>
+            </div>
+          </section>
+
+          <section class="settings-panel settings-panel-wide">
+            <h3>Tracked platforms</h3>
+            <p class="settings-description">
+              Shiori counts play time on these sites — browse pages and UI chrome are ignored.
+            </p>
+            <div class="platform-pill-row">
+              <span class="platform-pill">Netflix</span>
+              <span class="platform-pill">Disney+</span>
+              <span class="platform-pill">Crunchyroll</span>
+              <span class="platform-pill">Prime Video</span>
+              <span class="platform-pill">HIDIVE</span>
+              <span class="platform-pill">Hulu</span>
+            </div>
+          </section>
+
+          <section class="settings-panel settings-panel-wide settings-about">
+            <div>
+              <h3>About Shiori</h3>
+              <p class="settings-description">
+                栞 — a bookmark for the anime you watch. Built for personal use with a Ghibli-inspired palette.
+              </p>
+            </div>
+            <p class="settings-version" id="settingsVersion">v—</p>
+          </section>
         </div>
       </div>
     </main>
