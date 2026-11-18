@@ -75,20 +75,32 @@ export function isServiceName(name) {
 }
 
 export function isUiNoiseTitle(name) {
-  const key = cleanText(name).toLowerCase();
+  const key = cleanText(name)
+    .toLowerCase()
+    .replace(/[?.!,;:'"“”‘’]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!key) return true;
   if (UI_NOISE_TITLES.has(key)) return true;
   if (key.includes('privacy preference')) return true;
   if (key.includes('cookie')) return true;
+  if (key.includes('who is watching') || key.includes('whos watching')) return true;
   if (key.startsWith('onetrust')) return true;
   return false;
 }
 
 /**
- * Parse episode markers from free text.
- * @param {string} text
- * @returns {{ seasonNumber: number|null, episodeNumber: number|null, episodeLabel: string|null, remainder: string }|null}
+ * True when we have a real episode identity worth storing.
+ * Freeform labels alone are too noisy (cookie banners, profile chrome).
  */
+export function isUsableEpisodeRef(seasonNumber, episodeNumber, episodeLabel) {
+  const num = episodeNumber != null ? Number(episodeNumber) : NaN;
+  if (Number.isFinite(num) && num > 0) return true;
+  const parsed = parseEpisodeLabel(episodeLabel || '');
+  if (parsed?.episodeNumber != null && parsed.episodeNumber > 0) return true;
+  return false;
+}
+
 /**
  * Parse "Season N" from free text (selector labels, aria-labels, etc.).
  * @param {string} text
@@ -267,8 +279,13 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
       seasonNumber != null
         ? `S${seasonNumber} E${episodeNumber} · ${episodeText}`
         : `Episode ${episodeNumber} · ${episodeText}`;
-  } else if (episodeText && episodeNumber == null && !isServiceName(episodeText)) {
-    // Subtitle without number — keep as label only
+  } else if (
+    episodeText &&
+    episodeNumber == null &&
+    !isServiceName(episodeText) &&
+    !isUiNoiseTitle(episodeText)
+  ) {
+    // Subtitle without number — keep as label only when it isn't UI chrome
     episodeLabel = episodeText;
   }
 
@@ -284,6 +301,12 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
           : null;
   }
 
+  // Drop unparseable episode identity entirely (no freeform-only keys).
+  if (!isUsableEpisodeRef(seasonNumber, episodeNumber, episodeLabel)) {
+    episodeNumber = null;
+    episodeLabel = null;
+  }
+
   return {
     showName: title,
     seasonNumber,
@@ -294,12 +317,23 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
 
 /**
  * Stable episode storage key including season when known.
+ * Returns null when episode identity is missing or UI noise.
  */
 export function episodeStorageKey(seasonNumber, episodeNumber, episodeLabel) {
-  if (episodeNumber != null) {
-    const season = seasonNumber != null ? Number(seasonNumber) : 1;
-    return `S${season}E${episodeNumber}`;
-  }
-  if (episodeLabel) return String(episodeLabel);
-  return null;
+  if (!isUsableEpisodeRef(seasonNumber, episodeNumber, episodeLabel)) return null;
+
+  const parsed = parseEpisodeLabel(episodeLabel || '');
+  const ep =
+    episodeNumber != null && Number(episodeNumber) > 0
+      ? Number(episodeNumber)
+      : parsed?.episodeNumber;
+  if (ep == null) return null;
+
+  const season =
+    seasonNumber != null && Number(seasonNumber) > 0
+      ? Number(seasonNumber)
+      : parsed?.seasonNumber != null
+        ? Number(parsed.seasonNumber)
+        : 1;
+  return `S${season}E${ep}`;
 }

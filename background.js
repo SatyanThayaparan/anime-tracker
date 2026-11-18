@@ -7,7 +7,11 @@ import {
 } from './utils/anilist.js';
 import { extractHostname } from './utils/categories.js';
 import { getPlatform, isPlayerPage, isWatchSite } from './utils/shows.js';
-import { episodeStorageKey, isUiNoiseTitle } from './utils/normalize.js';
+import {
+  episodeStorageKey,
+  isUiNoiseTitle,
+  isUsableEpisodeRef,
+} from './utils/normalize.js';
 import {
   CURRENT_SCHEMA_VERSION,
   getDateKey,
@@ -446,8 +450,19 @@ function handleMessage(message, sender, sendResponse) {
             : currentTracking.showName === nextName
               ? currentTracking.seasonNumber
               : null;
-        const nextEpisode =
-          message.showInfo.episodeNumber ?? message.showInfo.episodeLabel ?? null;
+
+        // Only keep parseable episode identity — never cookie/profile chrome.
+        let nextEpisodeNumber = message.showInfo.episodeNumber ?? null;
+        let nextEpisodeLabel = message.showInfo.episodeLabel ?? null;
+        if (nextEpisodeLabel && isUiNoiseTitle(nextEpisodeLabel)) {
+          nextEpisodeLabel = null;
+        }
+        if (!isUsableEpisodeRef(nextSeason, nextEpisodeNumber, nextEpisodeLabel)) {
+          nextEpisodeNumber = null;
+          nextEpisodeLabel = null;
+        }
+
+        const nextEpisode = nextEpisodeNumber ?? nextEpisodeLabel ?? null;
         const prevEpisode =
           currentTracking.episodeNumber ?? currentTracking.episodeLabel ?? null;
         const changed =
@@ -465,8 +480,8 @@ function handleMessage(message, sender, sendResponse) {
         const showChanged = currentTracking.showName !== nextName;
         currentTracking.showName = nextName;
         currentTracking.seasonNumber = nextSeason;
-        currentTracking.episodeNumber = message.showInfo.episodeNumber ?? null;
-        currentTracking.episodeLabel = message.showInfo.episodeLabel ?? null;
+        currentTracking.episodeNumber = nextEpisodeNumber;
+        currentTracking.episodeLabel = nextEpisodeLabel;
         if (message.showInfo.site) currentTracking.platform = message.showInfo.site;
 
         if (showChanged || !currentTracking.animeMatch) {

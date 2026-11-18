@@ -2,7 +2,7 @@
   "name": "anime-tracker",
   "private": true,
   "type": "module",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "Shiori — bookmark your anime watching on Netflix, Disney+, Crunchyroll, Prime Video, HIDIVE, and Hulu",
   "scripts": {
     "version:bump": "node scripts/bump-version.mjs",

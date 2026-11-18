@@ -3,9 +3,14 @@
  * Helper functions for reading/writing usage data and aggregation
  */
 
-import { isServiceName, normalizeWatchIdentity } from './normalize.js';
+import {
+  isServiceName,
+  isUiNoiseTitle,
+  isUsableEpisodeRef,
+  normalizeWatchIdentity,
+} from './normalize.js';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /**
  * Get local date key in YYYY-MM-DD format
@@ -456,17 +461,44 @@ function recomputeDailyStats(dayData) {
   };
 }
 
+function scrubShowEpisodes(showData = {}) {
+  const episodes = { ...(showData.episodes || {}) };
+  let removed = 0;
+  for (const [epKey, ep] of Object.entries(episodes)) {
+    const fromKey = /^S(\d+)E(\d+)$/i.exec(epKey);
+    const usable = isUsableEpisodeRef(
+      ep?.seasonNumber ?? (fromKey ? Number(fromKey[1]) : null),
+      fromKey ? Number(fromKey[2]) : null,
+      ep?.label || epKey
+    );
+    if (!usable || isUiNoiseTitle(epKey) || isUiNoiseTitle(ep?.label)) {
+      delete episodes[epKey];
+      removed += 1;
+    }
+  }
+  return { episodes, removed };
+}
+
 function dayNeedsRepair(shows = {}) {
-  return Object.keys(shows).some((rawName) => {
-    if (isServiceName(rawName)) return true;
+  return Object.entries(shows).some(([rawName, showData]) => {
+    if (isServiceName(rawName) || isUiNoiseTitle(rawName)) return true;
     const normalized = normalizeWatchIdentity(rawName);
-    return Boolean(normalized && normalized.showName !== rawName);
+    if (normalized && normalized.showName !== rawName) return true;
+    return Object.entries(showData?.episodes || {}).some(([epKey, ep]) => {
+      if (isUiNoiseTitle(epKey) || isUiNoiseTitle(ep?.label)) return true;
+      const fromKey = /^S(\d+)E(\d+)$/i.exec(epKey);
+      return !isUsableEpisodeRef(
+        ep?.seasonNumber ?? (fromKey ? Number(fromKey[1]) : null),
+        fromKey ? Number(fromKey[2]) : null,
+        ep?.label || epKey
+      );
+    });
   });
 }
 
 /**
- * Repair fragmented show keys (service names / glued episode titles).
- * Preserves time by merging into canonical shows (never deletes watch time).
+ * Repair fragmented show keys and drop UI-chrome shows/episodes
+ * (cookie banners, profile pickers, unparseable freeform episode labels).
  * @returns {Promise<{ migrated: boolean, fixedShows: number }>}
  */
 export async function migrateWatchData(targetSchema = CURRENT_SCHEMA_VERSION) {
@@ -489,6 +521,12 @@ export async function migrateWatchData(targetSchema = CURRENT_SCHEMA_VERSION) {
     const orphans = [];
 
     for (const [rawName, showData] of Object.entries(value.shows)) {
+      // Drop Disney+/streaming chrome that was never a real title.
+      if (isUiNoiseTitle(rawName)) {
+        fixedShows += 1;
+        continue;
+      }
+
       if (isServiceName(rawName)) {
         orphans.push(showData);
         fixedShows += 1;
@@ -498,20 +536,33 @@ export async function migrateWatchData(targetSchema = CURRENT_SCHEMA_VERSION) {
       const normalized = normalizeWatchIdentity(rawName);
       const canonical = normalized?.showName || rawName;
       if (canonical !== rawName) fixedShows += 1;
+      if (isUiNoiseTitle(canonical)) {
+        fixedShows += 1;
+        continue;
+      }
+
+      const scrubbed = scrubShowEpisodes(showData);
+      fixedShows += scrubbed.removed;
+      const cleanedShow = { ...showData, episodes: scrubbed.episodes };
 
       if (!nextShows[canonical]) {
-        nextShows[canonical] = emptyShow(showData);
+        nextShows[canonical] = emptyShow(cleanedShow);
       }
-      mergeShowRecords(nextShows[canonical], showData);
+      mergeShowRecords(nextShows[canonical], cleanedShow);
 
       // Attribute glued-title time into an episode bucket (show total already merged above).
       // Only seed when this source had no episode map of its own (avoid double-counting).
       const hadEpisodes = Object.keys(showData.episodes || {}).length > 0;
       if (
         !hadEpisodes &&
-        (normalized?.episodeNumber != null || normalized?.episodeLabel)
+        normalized?.episodeNumber != null &&
+        isUsableEpisodeRef(
+          normalized.seasonNumber,
+          normalized.episodeNumber,
+          normalized.episodeLabel
+        )
       ) {
-        const episodeKey = String(normalized.episodeNumber ?? normalized.episodeLabel);
+        const episodeKey = `S${normalized.seasonNumber || 1}E${normalized.episodeNumber}`;
         if (!nextShows[canonical].episodes[episodeKey]) {
           nextShows[canonical].episodes[episodeKey] = {
             time: showData.totalTime || 0,
@@ -521,6 +572,7 @@ export async function migrateWatchData(targetSchema = CURRENT_SCHEMA_VERSION) {
             completed: false,
             timestamp: showData.lastWatched || Date.now(),
             sessions: showData.sessions || 0,
+            seasonNumber: normalized.seasonNumber || 1,
             label: normalized.episodeLabel || episodeKey,
           };
         } else {
@@ -533,9 +585,7 @@ export async function migrateWatchData(targetSchema = CURRENT_SCHEMA_VERSION) {
     for (const orphan of orphans) {
       const candidates = Object.values(nextShows);
       if (!candidates.length) {
-        nextShows['Other watching'] = emptyShow(orphan);
-        mergeShowRecords(nextShows['Other watching'], orphan);
-        continue;
+        continue; // drop orphaned service chrome rather than invent "Other watching"
       }
       candidates.sort((a, b) => (b.totalTime || 0) - (a.totalTime || 0));
       const preferred =

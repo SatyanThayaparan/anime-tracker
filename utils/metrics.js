@@ -2,7 +2,21 @@
  * Derived insights for Shiori dashboards.
  */
 
+import { isUiNoiseTitle, isUsableEpisodeRef } from './normalize.js';
 import { formatTime, getDateKey, getDateRange } from './storage.js';
+
+function isRealEpisodeRow(row) {
+  if (!row?.showName || isUiNoiseTitle(row.showName)) return false;
+  if (isUiNoiseTitle(row.episodeKey) || isUiNoiseTitle(row.episode?.label)) return false;
+  return isUsableEpisodeRef(
+    row.episode?.seasonNumber,
+    // Prefer number from S#E# key
+    /^S\d+E(\d+)$/i.test(String(row.episodeKey || ''))
+      ? Number(String(row.episodeKey).replace(/^S\d+E/i, ''))
+      : null,
+    row.episode?.label || row.episodeKey
+  );
+}
 
 export const SUGGESTED_TAGS = [
   'shonen',
@@ -146,7 +160,9 @@ export function computeInsights(aggregated, { showTags = {}, streakDaily = null 
   const episodes = allEpisodes(shows);
 
   const started = episodes.filter(
-    (row) => (row.episode.time || 0) > 0 || (row.episode.progress || 0) > 0.01
+    (row) =>
+      isRealEpisodeRow(row) &&
+      ((row.episode.time || 0) > 0 || (row.episode.progress || 0) > 0.01)
   );
   const completed = started.filter(
     (row) => row.episode.completed || (row.episode.progress || 0) >= 0.8
@@ -171,7 +187,8 @@ export function computeInsights(aggregated, { showTags = {}, streakDaily = null 
   const streaks = computeStreaks(dailyForStreak);
 
   const platformTotals = {};
-  for (const show of Object.values(shows)) {
+  for (const [showName, show] of Object.entries(shows)) {
+    if (isUiNoiseTitle(showName)) continue;
     const key = platformKey(show);
     platformTotals[key] = (platformTotals[key] || 0) + (show.totalTime || 0);
   }
@@ -201,19 +218,26 @@ export function computeInsights(aggregated, { showTags = {}, streakDaily = null 
     }))
     .sort((a, b) => b.progress - a.progress);
 
+  // Pace only uses episodes with known runtime, and caps watched at 1× runtime
+  // so pause-era overcounting / rewatches don't read as "170% of runtime".
   let watchedAgainstRuntime = 0;
   let runtimeMs = 0;
+  let paceCapped = false;
   for (const row of started) {
-    watchedAgainstRuntime += row.episode.time || 0;
-    if (row.episode.duration > 0) {
-      runtimeMs += row.episode.duration * 1000;
-    }
+    if (!(row.episode.duration > 0)) continue;
+    const runtime = row.episode.duration * 1000;
+    const rawWatched = row.episode.time || 0;
+    const watched = Math.min(rawWatched, runtime);
+    if (rawWatched > runtime) paceCapped = true;
+    watchedAgainstRuntime += watched;
+    runtimeMs += runtime;
   }
   const paceRatio = runtimeMs > 0 ? watchedAgainstRuntime / runtimeMs : null;
   const pacePct = paceRatio != null ? Math.round(paceRatio * 100) : null;
 
   const tagMap = {};
   for (const [showName, show] of Object.entries(shows)) {
+    if (isUiNoiseTitle(showName)) continue;
     const tags = showTags[showName] || [];
     for (const tag of tags) {
       if (!tagMap[tag]) tagMap[tag] = { tag, shows: 0, ms: 0 };
@@ -223,10 +247,11 @@ export function computeInsights(aggregated, { showTags = {}, streakDaily = null 
   }
   const genreTags = Object.values(tagMap).sort((a, b) => b.ms - a.ms);
   const untaggedShows = Object.keys(shows).filter(
-    (name) => !(showTags[name] || []).length
+    (name) => !isUiNoiseTitle(name) && !(showTags[name] || []).length
   ).length;
 
   const rewatchEpisodes = episodes
+    .filter((row) => isRealEpisodeRow(row))
     .map((row) => ({
       showName: row.showName,
       episodeKey: row.episodeKey,
@@ -307,10 +332,13 @@ export function computeInsights(aggregated, { showTags = {}, streakDaily = null 
       pct: pacePct,
       watchedMs: watchedAgainstRuntime,
       runtimeMs,
+      capped: paceCapped,
       label: pacePct != null ? `${pacePct}% of runtime` : '—',
       detail:
         pacePct != null
-          ? `${formatTime(watchedAgainstRuntime, true)} watched vs ${formatTime(runtimeMs, true)} runtime`
+          ? `${formatTime(watchedAgainstRuntime, true)} watched vs ${formatTime(runtimeMs, true)} runtime${
+              paceCapped ? ' · capped at episode length' : ''
+            }`
           : 'Need episode duration from the player',
     },
     genreTags: {
