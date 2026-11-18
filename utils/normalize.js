@@ -13,6 +13,8 @@ const SERVICE_NAMES = new Set([
   'primevideo',
   'amazon prime video',
   'amazon prime',
+  'hidive',
+  'hulu',
   'anime tracker',
   'shiori',
 ]);
@@ -48,6 +50,8 @@ const UI_NOISE_TITLES = new Set([
   'amazon prime video',
   'amazon prime',
   'amazon',
+  'hidive',
+  'hulu',
   'watchlist',
   'history',
   'my lists',
@@ -227,6 +231,10 @@ export function normalizeWatchIdentity(rawTitle, rawEpisodeText = '') {
     .replace(/\s*[-–|]\s*Crunchyroll.*$/i, '')
     .replace(/\s*[-–|:]\s*Prime Video.*$/i, '')
     .replace(/\s*[-–|:]\s*Amazon Prime.*$/i, '')
+    .replace(/\s*[-–|:]\s*HIDIVE.*$/i, '')
+    .replace(/\s*[-–|:]\s*HiDive.*$/i, '')
+    .replace(/\s*[-–|:]\s*Watch on Hulu.*$/i, '')
+    .replace(/\s*[-–|:]\s*Hulu.*$/i, '')
     .trim();
 
   if (isServiceName(title) || isUiNoiseTitle(title)) return null;

@@ -211,6 +211,8 @@ async function injectIntoOpenWatchTabs() {
         '*://*.amazon.co.jp/gp/video/*',
         '*://*.amazon.com.au/gp/video/*',
         '*://*.amazon.in/gp/video/*',
+        '*://*.hidive.com/*',
+        '*://*.hulu.com/*',
       ],
     });
 

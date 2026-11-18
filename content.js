@@ -1,5 +1,5 @@
 /**
- * Content script for Netflix / Disney+ / Crunchyroll / Prime Video.
+ * Content script for Netflix / Disney+ / Crunchyroll / Prime Video / HIDIVE / Hulu.
  * Loads utils via chrome.runtime.getURL so MV3 content scripts can use modules.
  * Re-injectable after extension reload (tears down any previous instance first).
  */

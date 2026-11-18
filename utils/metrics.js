@@ -24,6 +24,8 @@ function platformKey(show) {
   if (raw.includes('youtube') || raw.includes('youtu')) return 'youtube';
   if (raw.includes('crunchyroll')) return 'crunchyroll';
   if (raw.includes('prime') || raw.includes('amazon')) return 'primevideo';
+  if (raw.includes('hidive')) return 'hidive';
+  if (raw.includes('hulu')) return 'hulu';
   if (!raw) return 'unknown';
   return raw;
 }
@@ -36,6 +38,8 @@ function platformLabel(key) {
       youtube: 'YouTube',
       crunchyroll: 'Crunchyroll',
       primevideo: 'Prime Video',
+      hidive: 'HIDIVE',
+      hulu: 'Hulu',
       unknown: 'Unknown',
     }[key] || key
   );

@@ -1,6 +1,6 @@
 /**
  * Platform detection + title/episode extraction for
- * Netflix, Disney+, Crunchyroll, Prime Video.
+ * Netflix, Disney+, Crunchyroll, Prime Video, HIDIVE, Hulu.
  */
 
 import {
@@ -16,6 +16,8 @@ export const WATCH_SITES = [
   'disneyplus.com',
   'crunchyroll.com',
   'primevideo.com',
+  'hidive.com',
+  'hulu.com',
 ];
 
 function isAmazonHost(host) {
@@ -67,7 +69,7 @@ export const isAnimeSite = isWatchSite;
 
 /**
  * @param {string} url
- * @returns {'netflix'|'disneyplus'|'crunchyroll'|'primevideo'|null}
+ * @returns {'netflix'|'disneyplus'|'crunchyroll'|'primevideo'|'hidive'|'hulu'|null}
  */
 export function getPlatform(url) {
   try {
@@ -77,6 +79,8 @@ export function getPlatform(url) {
     if (host.includes('disneyplus')) return 'disneyplus';
     if (host.includes('crunchyroll')) return 'crunchyroll';
     if (host.includes('primevideo')) return 'primevideo';
+    if (host.includes('hidive')) return 'hidive';
+    if (host.includes('hulu')) return 'hulu';
     if (isAmazonHost(host) && isPrimeVideoPath(parsed.pathname, host)) {
       return 'primevideo';
     }
@@ -131,7 +135,7 @@ export function findVideoPlayer(doc = document) {
 /**
  * True when the URL is a playback page (not browse/search/profile).
  * @param {string} url
- * @param {'netflix'|'disneyplus'|'crunchyroll'|'primevideo'|null} [platform]
+ * @param {'netflix'|'disneyplus'|'crunchyroll'|'primevideo'|'hidive'|'hulu'|null} [platform]
  */
 export function isPlayerPage(url, platform = getPlatform(url)) {
   try {
@@ -153,10 +157,59 @@ export function isPlayerPage(url, platform = getPlatform(url)) {
         path.includes('/video/detail')
       );
     }
+    if (platform === 'hidive') {
+      // New: /video/{id}  Legacy: /stream/{slug}/s01e001
+      return path.includes('/video/') || path.includes('/stream/');
+    }
+    if (platform === 'hulu') return path.includes('/watch/');
     return false;
   } catch {
     return false;
   }
+}
+
+function readJsonLdEntities(doc = document) {
+  const nodes = Array.from(doc.querySelectorAll('script[type="application/ld+json"]'));
+  const entities = [];
+  for (const node of nodes) {
+    try {
+      const parsed = JSON.parse(node.textContent || 'null');
+      if (!parsed) continue;
+      if (Array.isArray(parsed)) entities.push(...parsed);
+      else if (Array.isArray(parsed['@graph'])) entities.push(...parsed['@graph']);
+      else entities.push(parsed);
+    } catch {
+      /* ignore bad json-ld */
+    }
+  }
+  return entities;
+}
+
+function fromJsonLdWatchIdentity(doc = document) {
+  const entities = readJsonLdEntities(doc);
+  for (const entity of entities) {
+    const type = String(entity?.['@type'] || '');
+    if (!/TVEpisode|Episode|Movie|TVSeries|VideoObject/i.test(type)) continue;
+    const showName =
+      cleanText(entity.partOfSeries?.name) ||
+      cleanText(entity.partOfSeason?.partOfSeries?.name) ||
+      (type.match(/Movie|TVSeries|VideoObject/i) ? cleanText(entity.name) : '') ||
+      cleanText(entity.partOfSeries) ||
+      '';
+    const episodeName = /TVEpisode|Episode/i.test(type) ? cleanText(entity.name) : '';
+    const seasonNumber =
+      Number(entity.partOfSeason?.seasonNumber ?? entity.seasonNumber) || null;
+    const episodeNumber = Number(entity.episodeNumber) || null;
+    if (!showName && !episodeName) continue;
+    return {
+      showName: showName || episodeName,
+      seasonNumber: Number.isFinite(seasonNumber) && seasonNumber > 0 ? seasonNumber : null,
+      episodeNumber:
+        Number.isFinite(episodeNumber) && episodeNumber > 0 ? episodeNumber : null,
+      episodeLabel: episodeName || null,
+    };
+  }
+  return null;
 }
 
 /**
@@ -580,6 +633,187 @@ function parsePrimeVideo(url, doc = document) {
   };
 }
 
+function parseHidiveSeasonEpisodeFromUrl(url) {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    // Legacy: /stream/show-slug/s01e010
+    const legacy = path.match(/\/stream\/([^/]+)\/s(\d+)e(\d+)/i);
+    if (legacy) {
+      const slug = decodeURIComponent(legacy[1]).replace(/[-_]+/g, ' ');
+      return {
+        showHint: slug.replace(/\b\w/g, (c) => c.toUpperCase()),
+        seasonNumber: Number(legacy[2]),
+        episodeNumber: Number(legacy[3]),
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function parseHidive(url, doc = document) {
+  if (!isPlayerPage(url, 'hidive')) return null;
+
+  const fromUrl = parseHidiveSeasonEpisodeFromUrl(url);
+  const jsonLd = fromJsonLdWatchIdentity(doc);
+
+  let showCandidate =
+    firstText(
+      [
+        '[class*="video-title"]',
+        '[class*="VideoTitle"]',
+        '[data-testid*="title"]',
+        '[class*="series-title"]',
+        '[class*="content-title"]',
+      ],
+      doc
+    ) ||
+    jsonLd?.showName ||
+    fromUrl?.showHint ||
+    '';
+
+  let episodeCandidate =
+    firstText(
+      [
+        '[class*="episode-title"]',
+        '[class*="EpisodeTitle"]',
+        '[data-testid*="episode"]',
+        '[class*="subtitle"]',
+      ],
+      doc
+    ) ||
+    jsonLd?.episodeLabel ||
+    '';
+
+  const docTitle = cleanText(
+    (doc.title || '')
+      .replace(/\s*[-–|:]\s*HIDIVE.*$/i, '')
+      .replace(/\s*[-–|:]\s*HiDive.*$/i, '')
+  );
+
+  if (!showCandidate) {
+    showCandidate =
+      cleanText(doc.querySelector('meta[property="og:title"]')?.content) || docTitle;
+  }
+
+  if (episodeCandidate && isUiNoiseTitle(episodeCandidate)) episodeCandidate = '';
+
+  const normalized = normalizeWatchIdentity(
+    showCandidate,
+    episodeCandidate || docTitle
+  );
+  if (!normalized || isUiNoiseTitle(normalized.showName)) return null;
+
+  const episodeParsed =
+    parseEpisodeLabel(episodeCandidate) || parseEpisodeLabel(docTitle);
+  const episodeNumber =
+    episodeParsed?.episodeNumber ??
+    normalized.episodeNumber ??
+    jsonLd?.episodeNumber ??
+    fromUrl?.episodeNumber ??
+    null;
+  const seasonNumber =
+    episodeParsed?.seasonNumber ??
+    normalized.seasonNumber ??
+    jsonLd?.seasonNumber ??
+    fromUrl?.seasonNumber ??
+    parseSeasonOnly(episodeCandidate) ??
+    parseSeasonOnly(docTitle) ??
+    null;
+
+  return {
+    showName: normalized.showName,
+    seasonNumber,
+    episodeNumber,
+    episodeLabel:
+      episodeParsed?.episodeLabel ||
+      normalized.episodeLabel ||
+      (episodeCandidate ? cleanText(episodeCandidate) : null),
+    site: 'hidive',
+    url,
+  };
+}
+
+function parseHulu(url, doc = document) {
+  if (!isPlayerPage(url, 'hulu')) return null;
+
+  const jsonLd = fromJsonLdWatchIdentity(doc);
+
+  let showCandidate =
+    firstText(
+      [
+        '[data-testid="player-title"]',
+        '[data-testid="show-name"]',
+        '[class*="PlayerMetadata"] [class*="title"]',
+        '[class*="player-title"]',
+        'h1',
+      ],
+      doc
+    ) ||
+    jsonLd?.showName ||
+    '';
+
+  let episodeCandidate =
+    firstText(
+      [
+        '[data-testid="player-subtitle"]',
+        '[data-testid="episode-name"]',
+        '[class*="PlayerMetadata"] [class*="subtitle"]',
+        '[class*="player-subtitle"]',
+        '[class*="episode"]',
+      ],
+      doc
+    ) ||
+    jsonLd?.episodeLabel ||
+    '';
+
+  if (episodeCandidate && isUiNoiseTitle(episodeCandidate)) episodeCandidate = '';
+
+  const docTitle = cleanText(
+    (doc.title || '').replace(/\s*[-–|:]\s*Watch on Hulu.*$/i, '').replace(/\s*[-–|:]\s*Hulu.*$/i, '')
+  );
+
+  if (!showCandidate) {
+    showCandidate =
+      cleanText(doc.querySelector('meta[property="og:title"]')?.content) || docTitle;
+  }
+
+  // Hulu titles sometimes look like "Show Name: Season 2 Episode 3 ..."
+  const normalized = normalizeWatchIdentity(
+    showCandidate,
+    episodeCandidate || docTitle
+  );
+  if (!normalized || isUiNoiseTitle(normalized.showName)) return null;
+
+  const episodeParsed =
+    parseEpisodeLabel(episodeCandidate) || parseEpisodeLabel(docTitle);
+  const episodeNumber =
+    episodeParsed?.episodeNumber ??
+    normalized.episodeNumber ??
+    jsonLd?.episodeNumber ??
+    null;
+  const seasonNumber =
+    episodeParsed?.seasonNumber ??
+    normalized.seasonNumber ??
+    jsonLd?.seasonNumber ??
+    parseSeasonOnly(episodeCandidate) ??
+    parseSeasonOnly(docTitle) ??
+    null;
+
+  return {
+    showName: normalized.showName,
+    seasonNumber,
+    episodeNumber,
+    episodeLabel:
+      episodeParsed?.episodeLabel ||
+      normalized.episodeLabel ||
+      (episodeCandidate ? cleanText(episodeCandidate) : null),
+    site: 'hulu',
+    url,
+  };
+}
+
 /**
  * Extract watch metadata for the current page.
  * @param {string} url
@@ -594,6 +828,8 @@ export function extractShowInfo(url, doc = document) {
     if (platform === 'disneyplus') return parseDisneyPlus(url, doc);
     if (platform === 'crunchyroll') return parseCrunchyroll(url, doc);
     if (platform === 'primevideo') return parsePrimeVideo(url, doc);
+    if (platform === 'hidive') return parseHidive(url, doc);
+    if (platform === 'hulu') return parseHulu(url, doc);
   } catch (error) {
     console.debug('[Shiori] extractShowInfo failed', error);
   }

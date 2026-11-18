@@ -33,7 +33,9 @@ export const DEFAULT_CATEGORIES = {
       'soundcloud.com',
       'vimeo.com',
       'dailymotion.com',
-      'crunchyroll.com'
+      'crunchyroll.com',
+      'hidive.com',
+      'hulu.com'
     ]
   },
   productivity: {
