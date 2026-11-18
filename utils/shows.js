@@ -1,6 +1,6 @@
 /**
  * Platform detection + title/episode extraction for
- * Netflix, YouTube, Disney+, Crunchyroll, Prime Video.
+ * Netflix, Disney+, Crunchyroll, Prime Video.
  */
 
 import {
@@ -13,8 +13,6 @@ import {
 
 export const WATCH_SITES = [
   'netflix.com',
-  'youtube.com',
-  'youtu.be',
   'disneyplus.com',
   'crunchyroll.com',
   'primevideo.com',
@@ -69,14 +67,13 @@ export const isAnimeSite = isWatchSite;
 
 /**
  * @param {string} url
- * @returns {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|'primevideo'|null}
+ * @returns {'netflix'|'disneyplus'|'crunchyroll'|'primevideo'|null}
  */
 export function getPlatform(url) {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
     if (host.includes('netflix')) return 'netflix';
-    if (host.includes('youtube') || host === 'youtu.be') return 'youtube';
     if (host.includes('disneyplus')) return 'disneyplus';
     if (host.includes('crunchyroll')) return 'crunchyroll';
     if (host.includes('primevideo')) return 'primevideo';
@@ -134,13 +131,12 @@ export function findVideoPlayer(doc = document) {
 /**
  * True when the URL is a playback page (not browse/search/profile).
  * @param {string} url
- * @param {'netflix'|'youtube'|'disneyplus'|'crunchyroll'|'primevideo'|null} [platform]
+ * @param {'netflix'|'disneyplus'|'crunchyroll'|'primevideo'|null} [platform]
  */
 export function isPlayerPage(url, platform = getPlatform(url)) {
   try {
     const path = new URL(url).pathname.toLowerCase();
     if (platform === 'netflix') return path.includes('/watch');
-    if (platform === 'youtube') return path.includes('/watch') || path === '/';
     if (platform === 'disneyplus') {
       return (
         path.includes('/play/') ||
@@ -217,43 +213,6 @@ export function inferPlaybackState(doc = document) {
   }
 
   return null;
-}
-
-function parseYouTube(url, doc = document) {
-  const title =
-    firstText(
-      [
-        'h1.ytd-watch-metadata yt-formatted-string',
-        'h1.ytd-video-primary-info-renderer',
-        '#title h1',
-        'h1.title',
-      ],
-      doc
-    ) ||
-    cleanText(doc.querySelector('meta[property="og:title"]')?.content) ||
-    cleanText(doc.title.replace(/ - YouTube$/i, ''));
-
-  const channel = firstText(
-    [
-      '#channel-name a',
-      'ytd-channel-name a',
-      '#owner-name a',
-      '#upload-info #channel-name',
-    ],
-    doc
-  );
-
-  const normalized = normalizeWatchIdentity(title);
-  if (!normalized) return null;
-
-  return {
-    showName: normalized.showName,
-    seasonNumber: normalized.seasonNumber,
-    episodeNumber: null,
-    episodeLabel: channel || null,
-    site: 'youtube',
-    url,
-  };
 }
 
 /**
@@ -631,7 +590,6 @@ export function extractShowInfo(url, doc = document) {
   if (!platform) return null;
 
   try {
-    if (platform === 'youtube') return parseYouTube(url, doc);
     if (platform === 'netflix') return parseNetflix(url, doc);
     if (platform === 'disneyplus') return parseDisneyPlus(url, doc);
     if (platform === 'crunchyroll') return parseCrunchyroll(url, doc);

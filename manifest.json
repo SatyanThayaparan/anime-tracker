@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Shiori",
-  "version": "1.8.0",
-  "description": "Shiori (栞) — bookmark your anime watching on Netflix, YouTube, Disney+, Crunchyroll, and Prime Video.",
+  "version": "1.9.0",
+  "description": "Shiori (栞) — bookmark your anime watching on Netflix, Disney+, Crunchyroll, and Prime Video.",
   "permissions": [
     "tabs",
     "storage",
@@ -12,8 +12,6 @@
   ],
   "host_permissions": [
     "*://*.netflix.com/*",
-    "*://*.youtube.com/*",
-    "*://youtu.be/*",
     "*://*.disneyplus.com/*",
     "*://*.crunchyroll.com/*",
     "*://*.primevideo.com/*",
@@ -36,8 +34,6 @@
     {
       "matches": [
         "*://*.netflix.com/*",
-        "*://*.youtube.com/*",
-        "*://youtu.be/*",
         "*://*.disneyplus.com/*",
         "*://*.crunchyroll.com/*",
         "*://*.primevideo.com/*",
@@ -63,8 +59,6 @@
       ],
       "matches": [
         "*://*.netflix.com/*",
-        "*://*.youtube.com/*",
-        "*://youtu.be/*",
         "*://*.disneyplus.com/*",
         "*://*.crunchyroll.com/*",
         "*://*.primevideo.com/*",

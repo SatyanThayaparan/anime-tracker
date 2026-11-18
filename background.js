@@ -201,8 +201,6 @@ async function injectIntoOpenWatchTabs() {
     const tabs = await chrome.tabs.query({
       url: [
         '*://*.netflix.com/*',
-        '*://*.youtube.com/*',
-        '*://youtu.be/*',
         '*://*.disneyplus.com/*',
         '*://*.crunchyroll.com/*',
         '*://*.primevideo.com/*',

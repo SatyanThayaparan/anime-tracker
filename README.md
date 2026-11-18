@@ -2,16 +2,16 @@
 
 **Shiori** means *bookmark* in Japanese — a quiet name for keeping your place in the shows you watch.
 
-Chrome extension that tracks watching time on **Netflix**, **YouTube**, **Disney+**, **Crunchyroll**, and **Prime Video**. Stats stay local in your browser (daily / weekly / monthly), with a popup for “now watching” and a full dashboard.
+Chrome extension that tracks watching time on **Netflix**, **Disney+**, **Crunchyroll**, and **Prime Video**. Stats stay local in your browser (daily / weekly / monthly), with a popup for “now watching” and a full dashboard.
 
 Built for personal unpacked use first, with Web Store–friendly constraints (narrow hosts, no remote scripts). Multi-device sync is planned later via the same exportable schema.
 
 ## Features
 
-- Tracks titles on Netflix, YouTube, Disney+, Crunchyroll, and Prime Video
+- Tracks titles on Netflix, Disney+, Crunchyroll, and Prime Video
 - Idle-aware timing (pauses when you’re away)
 - Episode / subtitle labels when the page exposes them
-- Video progress when an HTML5 player is readable (YouTube strongest)
+- Video progress when an HTML5 player is readable
 - Popup + dashboard (charts, export, clear)
 - Local timezone day buckets
 
@@ -41,7 +41,7 @@ If you already had an older build loaded, click **Reload** on the extension card
 
 | Permission | Why |
 | --- | --- |
-| Host access to Netflix / YouTube / Disney+ / Crunchyroll / Prime Video | Read title metadata and detect watching on those pages only |
+| Host access to Netflix / Disney+ / Crunchyroll / Prime Video | Read title metadata and detect watching on those pages only |
 | `storage` | Save history locally |
 | `tabs` | Know which tab is active |
 | `idle` | Pause counting when you’re away |
@@ -52,7 +52,7 @@ If you already had an older build loaded, click **Reload** on the extension card
 ```text
 ├── background.js      # Service worker: sessions, alarms, storage writes
 ├── content.js         # Page sensing + heartbeats (loads utils via runtime URL)
-├── utils/shows.js     # Streaming site parsers (Netflix, YouTube, Disney+, Crunchyroll, Prime Video)
+├── utils/shows.js     # Streaming site parsers (Netflix, Disney+, Crunchyroll, Prime Video)
 ├── utils/storage.js   # Aggregations, export/clear, local date keys
 ├── popup/             # Now watching UI
 ├── dashboard/         # Stats UI

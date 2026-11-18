@@ -122,7 +122,7 @@ function displayCurrentWatching(tracking) {
       <div class="empty-state">
         <div class="empty-state-icon">📺</div>
         <div class="empty-state-title">Not watching anything</div>
-        <div class="empty-state-subtitle">Open Netflix, YouTube, Disney+, Crunchyroll, or Prime Video to start tracking</div>
+        <div class="empty-state-subtitle">Open Netflix, Disney+, Crunchyroll, or Prime Video to start tracking</div>
       </div>
     `;
     return;
@@ -149,7 +149,6 @@ function displayCurrentWatching(tracking) {
     (
       {
         netflix: 'Netflix',
-        youtube: 'YouTube',
         disneyplus: 'Disney+',
         crunchyroll: 'Crunchyroll',
         primevideo: 'Prime Video',
