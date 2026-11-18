@@ -40,6 +40,8 @@ let showChart = null;
 let hourlyChart = null;
 let dailyChart = null;
 let platformChart = null;
+let insightPrimeChart = null;
+let openInsightKey = null;
 
 /**
  * Initialize dashboard
@@ -109,8 +111,6 @@ function setupEventListeners() {
       closeInsightsDetail();
     }
   });
-
-  document.getElementById('insightsDetailClose')?.addEventListener('click', closeInsightsDetail);
 
   document.getElementById('detailTagForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -297,6 +297,14 @@ function resizeVisibleCharts() {
     }
     try {
       if (!document.getElementById('dailyChartWrap')?.hidden) dailyChart?.resize();
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (document.getElementById('insightsTab')?.classList.contains('active')) {
+        insightPrimeChart?.resize();
+        platformChart?.resize();
+      }
     } catch {
       /* ignore */
     }
@@ -663,205 +671,366 @@ function bindShowRowClicks(tbody) {
   });
 }
 
+function insightSupportButton(section, key, title, metric) {
+  return `
+    <button type="button" class="insight-support-btn" data-section="${section}" data-insight="${key}">
+      <span class="insight-label">${title}</span>
+      <span class="insight-value">${escapeHtml(metric?.label || '—')}</span>
+      <span class="insight-detail">${escapeHtml(metric?.detail || '')}</span>
+    </button>
+  `;
+}
+
+function renderGenreBars(items = [], limit = 8) {
+  if (!items.length) {
+    return `<p class="empty-state">Open a show and add tags to build your taste map.</p>`;
+  }
+  const top = items.slice(0, limit);
+  const maxMs = top[0].ms || 1;
+  return `
+    <div class="insight-bars insight-bars-featured">
+      ${top
+        .map(
+          (item) => `
+        <div class="insight-bar-row">
+          <span>${escapeHtml(item.tag)}</span>
+          <div class="insight-bar-track"><i style="width:${Math.max(8, Math.round((item.ms / maxMs) * 100))}%"></i></div>
+          <strong>${item.shows} · ${formatTime(item.ms, true)}</strong>
+        </div>`
+        )
+        .join('')}
+    </div>
+  `;
+}
+
 function renderInsights() {
-  const grid = document.getElementById('insightsGrid');
-  if (!grid || !currentInsights) return;
+  const root = document.getElementById('insightsStory');
+  if (!root || !currentInsights) return;
 
-  const cards = [
-    { key: 'completionRate', title: 'Completion rate' },
-    { key: 'bingeScore', title: 'Binge score' },
-    { key: 'streaks', title: 'Streaks' },
-    { key: 'platformSplit', title: 'Platform split' },
-    { key: 'primeHours', title: 'Prime hours' },
-    { key: 'resumeDebt', title: 'Resume debt' },
-    { key: 'pace', title: 'Pace vs runtime' },
-    { key: 'genreTags', title: 'Genre / tags' },
-    { key: 'rewatch', title: 'Rewatches' },
-    { key: 'focusRatio', title: 'Focus ratio' },
-  ];
+  const i = currentInsights;
+  const completionPct = i.completionRate?.value || 0;
 
-  grid.innerHTML = cards
-    .map(({ key, title }) => {
-      const metric = currentInsights[key];
-      return `
-        <button type="button" class="insight-card" data-insight="${key}">
-          <span class="insight-label">${title}</span>
-          <span class="insight-value">${escapeHtml(metric.label)}</span>
-          <span class="insight-detail">${escapeHtml(metric.detail)}</span>
-        </button>
-      `;
-    })
-    .join('');
+  root.innerHTML = `
+    <section class="insight-section" data-section="rhythm">
+      <header class="insight-section-head">
+        <h3>Your rhythm</h3>
+        <p>When and how steadily you watch</p>
+      </header>
+      <div class="insight-section-body">
+        <div class="insight-featured">
+          <div class="insight-featured-copy">
+            <span class="insight-label">Prime hours</span>
+            <span class="insight-value insight-anim">${escapeHtml(i.primeHours.label)}</span>
+            <span class="insight-detail">${escapeHtml(i.primeHours.detail)}</span>
+          </div>
+          <div class="insight-featured-viz">
+            <canvas id="insightPrimeChart" aria-label="Hourly watch activity"></canvas>
+          </div>
+        </div>
+        <div class="insight-support">
+          ${insightSupportButton('rhythm', 'streaks', 'Streaks', i.streaks)}
+          ${insightSupportButton('rhythm', 'focusRatio', 'Focus ratio', i.focusRatio)}
+        </div>
+        <div class="insight-expand" id="expand-rhythm" hidden></div>
+      </div>
+    </section>
 
-  grid.querySelectorAll('.insight-card').forEach((card) => {
-    card.addEventListener('click', () => openInsightDetail(card.dataset.insight));
+    <section class="insight-section" data-section="shows">
+      <header class="insight-section-head">
+        <h3>Your shows</h3>
+        <p>How you finish — or leave hanging</p>
+      </header>
+      <div class="insight-section-body">
+        <div class="insight-featured insight-featured-completion">
+          <div class="insight-featured-copy">
+            <span class="insight-label">Completion rate</span>
+            <span class="insight-value insight-anim">${escapeHtml(i.completionRate.label)}</span>
+            <span class="insight-detail">${escapeHtml(i.completionRate.detail)}</span>
+          </div>
+          <div class="insight-featured-viz">
+            <div class="completion-ring" style="--pct:${completionPct}" role="img" aria-label="${completionPct}% complete">
+              <strong>${completionPct}%</strong>
+              <span>${i.completionRate.completed}/${i.completionRate.started}</span>
+            </div>
+          </div>
+        </div>
+        <div class="insight-support">
+          ${insightSupportButton('shows', 'resumeDebt', 'Resume debt', i.resumeDebt)}
+          ${insightSupportButton('shows', 'bingeScore', 'Binge score', i.bingeScore)}
+          ${insightSupportButton('shows', 'pace', 'Pace vs runtime', i.pace)}
+        </div>
+        <div class="insight-expand" id="expand-shows" hidden></div>
+      </div>
+    </section>
+
+    <section class="insight-section" data-section="taste">
+      <header class="insight-section-head">
+        <h3>Your taste</h3>
+        <p>What you reach for most</p>
+      </header>
+      <div class="insight-section-body">
+        <div class="insight-featured insight-featured-taste">
+          <div class="insight-featured-copy">
+            <span class="insight-label">Genre / tags</span>
+            <span class="insight-value insight-anim">${escapeHtml(i.genreTags.label)}</span>
+            <span class="insight-detail">${escapeHtml(i.genreTags.detail)}</span>
+          </div>
+          <div class="insight-featured-viz insight-featured-viz-bars">
+            ${renderGenreBars(i.genreTags.items || [], 6)}
+          </div>
+        </div>
+        <div class="insight-support">
+          ${insightSupportButton('taste', 'platformSplit', 'Platform split', i.platformSplit)}
+          ${insightSupportButton('taste', 'rewatch', 'Rewatches', i.rewatch)}
+        </div>
+        <div class="insight-expand" id="expand-taste" hidden></div>
+      </div>
+    </section>
+  `;
+
+  root.querySelectorAll('.insight-support-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      toggleInsightExpand(btn.dataset.section, btn.dataset.insight);
+    });
+  });
+
+  // Restore open expander after re-render (range change).
+  if (openInsightKey) {
+    const btn = root.querySelector(`.insight-support-btn[data-insight="${openInsightKey}"]`);
+    if (btn) toggleInsightExpand(btn.dataset.section, openInsightKey, true);
+    else openInsightKey = null;
+  }
+
+  requestAnimationFrame(() => {
+    renderInsightPrimeChart(i.primeHours?.hours || []);
+    // Animate bars after paint
+    root.querySelectorAll('.insight-bar-track > i').forEach((bar) => {
+      const width = bar.style.width;
+      bar.style.width = '0%';
+      requestAnimationFrame(() => {
+        bar.style.width = width;
+      });
+    });
   });
 }
 
 function closeInsightsDetail() {
-  const panel = document.getElementById('insightsDetail');
-  if (panel) panel.hidden = true;
-  document.querySelectorAll('.insight-card.active').forEach((c) => c.classList.remove('active'));
+  openInsightKey = null;
+  document.querySelectorAll('.insight-support-btn.active').forEach((btn) => {
+    btn.classList.remove('active');
+  });
+  document.querySelectorAll('.insight-expand').forEach((panel) => {
+    panel.hidden = true;
+    panel.innerHTML = '';
+  });
 }
 
-function openInsightDetail(key) {
-  const metric = currentInsights?.[key];
-  const panel = document.getElementById('insightsDetail');
-  const title = document.getElementById('insightsDetailTitle');
-  const body = document.getElementById('insightsDetailBody');
-  if (!metric || !panel || !body) return;
+function toggleInsightExpand(section, key, forceOpen = false) {
+  const panel = document.getElementById(`expand-${section}`);
+  if (!panel || !currentInsights?.[key]) return;
 
-  document.querySelectorAll('.insight-card').forEach((card) => {
-    card.classList.toggle('active', card.dataset.insight === key);
+  const sameOpen = openInsightKey === key && !panel.hidden;
+  if (sameOpen && !forceOpen) {
+    closeInsightsDetail();
+    return;
+  }
+
+  // Only one expander open across all sections.
+  document.querySelectorAll('.insight-expand').forEach((el) => {
+    if (el !== panel) {
+      el.hidden = true;
+      el.innerHTML = '';
+    }
+  });
+  document.querySelectorAll('.insight-support-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.insight === key);
   });
 
-  const titles = {
-    completionRate: 'Completion rate',
-    bingeScore: 'Binge score',
-    streaks: 'Watch streaks',
-    platformSplit: 'Platform split',
-    primeHours: 'Prime hours',
-    resumeDebt: 'Resume debt',
-    pace: 'Pace vs runtime',
-    genreTags: 'Genre / tags',
-    rewatch: 'Rewatches',
-    focusRatio: 'Focus ratio',
-  };
-  title.textContent = titles[key] || 'Insight';
+  openInsightKey = key;
+  panel.hidden = false;
+  panel.innerHTML = buildInsightExpandHtml(key);
+  panel.querySelectorAll('button[data-show]').forEach((btn) => {
+    btn.addEventListener('click', () => openShowDetail(btn.dataset.show));
+  });
 
   if (key === 'platformSplit') {
-    body.innerHTML = `
-      <div class="chart-container" style="height:220px;margin-bottom:12px">
-        <canvas id="platformChart"></canvas>
-      </div>
-      <div class="insight-bars">
-        ${metric.items
-          .map(
-            (item) => `
-          <div class="insight-bar-row">
-            <span>${escapeHtml(item.label)}</span>
-            <div class="insight-bar-track"><i style="width:${item.pct}%"></i></div>
-            <strong>${item.pct}% · ${formatTime(item.ms, true)}</strong>
-          </div>`
-          )
-          .join('')}
-      </div>
-    `;
-    requestAnimationFrame(() => renderPlatformChart(metric.items));
-  } else if (key === 'resumeDebt') {
-    body.innerHTML = metric.items?.length
-      ? `<div class="detail-list">${metric.items
+    requestAnimationFrame(() =>
+      renderPlatformChart(currentInsights.platformSplit.items || [], 'insightPlatformChart')
+    );
+  }
+}
+
+function buildInsightExpandHtml(key) {
+  const metric = currentInsights?.[key];
+  if (!metric) return '';
+
+  if (key === 'platformSplit') {
+    return `
+      <div class="insight-expand-inner">
+        <div class="chart-container insight-expand-chart">
+          <canvas id="insightPlatformChart"></canvas>
+        </div>
+        <div class="insight-bars">
+          ${(metric.items || [])
+            .map(
+              (item) => `
+            <div class="insight-bar-row">
+              <span>${escapeHtml(item.label)}</span>
+              <div class="insight-bar-track"><i style="width:${item.pct}%"></i></div>
+              <strong>${item.pct}% · ${formatTime(item.ms, true)}</strong>
+            </div>`
+            )
+            .join('')}
+        </div>
+      </div>`;
+  }
+
+  if (key === 'resumeDebt') {
+    return metric.items?.length
+      ? `<div class="insight-expand-inner detail-list">${metric.items
           .map(
             (item) => `
         <div class="detail-episode">
-          <button type="button" class="ep-name" data-show="${escapeHtml(item.showName)}" style="border:none;background:none;padding:0;cursor:pointer;text-align:left;font:inherit;font-weight:700;color:var(--forest)">${escapeHtml(item.showName)} · ${escapeHtml(item.label)}</button>
+          <button type="button" class="ep-name linkish" data-show="${escapeHtml(item.showName)}">${escapeHtml(item.showName)} · ${escapeHtml(item.label)}</button>
           <span class="ep-time">${item.progress}%</span>
           <span class="ep-sub">${formatTime(item.time, true)} watched${item.remainingMs ? ` · ~${formatTime(item.remainingMs, true)} left` : ''}</span>
           <div class="ep-bar"><i style="width:${item.progress}%"></i></div>
         </div>`
           )
           .join('')}</div>`
-      : `<p class="empty-state">You're caught up — no unfinished episodes in this range.</p>`;
-  } else if (key === 'rewatch') {
-    body.innerHTML = metric.items?.length
-      ? `<div class="detail-list">${metric.items
+      : `<div class="insight-expand-inner"><p class="empty-state">You're caught up — no unfinished episodes in this range.</p></div>`;
+  }
+
+  if (key === 'rewatch') {
+    return metric.items?.length
+      ? `<div class="insight-expand-inner detail-list">${metric.items
           .map(
             (item) => `
         <div class="detail-episode">
-          <button type="button" class="ep-name" data-show="${escapeHtml(item.showName)}" style="border:none;background:none;padding:0;cursor:pointer;text-align:left;font:inherit;font-weight:700;color:var(--forest)">${escapeHtml(item.showName)} · ${escapeHtml(item.label)}</button>
+          <button type="button" class="ep-name linkish" data-show="${escapeHtml(item.showName)}">${escapeHtml(item.showName)} · ${escapeHtml(item.label)}</button>
           <span class="ep-time">${item.rewatches || 0} rewatch</span>
           <span class="ep-sub">${item.sessions} sessions on this episode</span>
         </div>`
           )
           .join('')}</div>`
-      : `<p class="empty-state">No rewatches logged yet.</p>`;
-  } else if (key === 'genreTags') {
-    body.innerHTML = `
-      <p style="margin-bottom:10px;color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
-      <div class="insight-bars">
-        ${
-          metric.items?.length
-            ? metric.items
-                .map(
-                  (item) => `
-          <div class="insight-bar-row">
-            <span>${escapeHtml(item.tag)}</span>
-            <div class="insight-bar-track"><i style="width:${Math.max(8, Math.round((item.ms / (metric.items[0].ms || 1)) * 100))}%"></i></div>
-            <strong>${item.shows} shows · ${formatTime(item.ms, true)}</strong>
-          </div>`
-                )
-                .join('')
-            : `<p class="empty-state">Open a show and add tags to build your taste map.</p>`
-        }
-      </div>
-    `;
-  } else if (key === 'primeHours') {
-    body.innerHTML = `
-      <div class="detail-stats">
-        <div class="detail-stat"><span>Peak hour</span><strong>${escapeHtml(metric.peakLabel)}</strong></div>
-        <div class="detail-stat"><span>Peak time</span><strong>${formatTime(metric.peakMs, true)}</strong></div>
-        <div class="detail-stat"><span>Best 3h window</span><strong>${escapeHtml(metric.windowLabel)}</strong></div>
-        <div class="detail-stat"><span>Window time</span><strong>${formatTime(metric.windowMs, true)}</strong></div>
-      </div>
-      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
-    `;
-  } else if (key === 'streaks') {
-    body.innerHTML = `
-      <div class="detail-stats">
-        <div class="detail-stat"><span>Current streak</span><strong>${metric.current}</strong></div>
-        <div class="detail-stat"><span>Best streak</span><strong>${metric.best}</strong></div>
-        <div class="detail-stat"><span>Last active</span><strong>${escapeHtml(metric.lastActive || '—')}</strong></div>
-      </div>
-      <p style="color:var(--text-secondary)">Streaks use any day with watch time in the last 90 days.</p>
-    `;
-  } else if (key === 'bingeScore') {
-    body.innerHTML = `
-      <div class="detail-stats">
-        <div class="detail-stat"><span>Minutes / session</span><strong>${metric.minutesPerSession}</strong></div>
-        <div class="detail-stat"><span>Finished eps / session</span><strong>${metric.episodesPerSession}</strong></div>
-      </div>
-      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
-    `;
-  } else if (key === 'completionRate') {
-    body.innerHTML = `
-      <div class="detail-stats">
-        <div class="detail-stat"><span>Completion</span><strong>${metric.value}%</strong></div>
-        <div class="detail-stat"><span>Finished</span><strong>${metric.completed}</strong></div>
-        <div class="detail-stat"><span>Started</span><strong>${metric.started}</strong></div>
-      </div>
-      <p style="color:var(--text-secondary)">Finished means ≥80% progress or marked complete.</p>
-    `;
-  } else if (key === 'pace') {
-    body.innerHTML = `
-      <div class="detail-stats">
-        <div class="detail-stat"><span>Pace</span><strong>${metric.pct != null ? `${metric.pct}%` : '—'}</strong></div>
-        <div class="detail-stat"><span>Watched</span><strong>${formatTime(metric.watchedMs, true)}</strong></div>
-        <div class="detail-stat"><span>Runtime</span><strong>${formatTime(metric.runtimeMs, true)}</strong></div>
-      </div>
-      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
-    `;
-  } else if (key === 'focusRatio') {
-    body.innerHTML = `
-      <div class="detail-stats">
-        <div class="detail-stat"><span>Focus</span><strong>${metric.pct != null ? `${metric.pct}%` : '—'}</strong></div>
-        <div class="detail-stat"><span>Playing</span><strong>${formatTime(metric.activeTime, true)}</strong></div>
-        <div class="detail-stat"><span>Paused</span><strong>${formatTime(metric.pausedTime, true)}</strong></div>
-      </div>
-      <p style="color:var(--text-secondary)">${escapeHtml(metric.detail)}</p>
-    `;
-  } else {
-    body.innerHTML = `<p>${escapeHtml(metric.detail)}</p>`;
+      : `<div class="insight-expand-inner"><p class="empty-state">No rewatches logged yet.</p></div>`;
   }
 
-  body.querySelectorAll('button[data-show]').forEach((btn) => {
-    btn.addEventListener('click', () => openShowDetail(btn.dataset.show));
-  });
+  if (key === 'streaks') {
+    return `
+      <div class="insight-expand-inner">
+        <div class="detail-stats">
+          <div class="detail-stat"><span>Current streak</span><strong>${metric.current}</strong></div>
+          <div class="detail-stat"><span>Best streak</span><strong>${metric.best}</strong></div>
+          <div class="detail-stat"><span>Last active</span><strong>${escapeHtml(metric.lastActive || '—')}</strong></div>
+        </div>
+        <p class="insight-expand-note">Streaks use any day with watch time in the last 90 days.</p>
+      </div>`;
+  }
 
-  panel.hidden = false;
+  if (key === 'bingeScore') {
+    return `
+      <div class="insight-expand-inner">
+        <div class="detail-stats">
+          <div class="detail-stat"><span>Minutes / session</span><strong>${metric.minutesPerSession}</strong></div>
+          <div class="detail-stat"><span>Finished eps / session</span><strong>${metric.episodesPerSession}</strong></div>
+        </div>
+        <p class="insight-expand-note">${escapeHtml(metric.detail)}</p>
+      </div>`;
+  }
+
+  if (key === 'pace') {
+    return `
+      <div class="insight-expand-inner">
+        <div class="detail-stats">
+          <div class="detail-stat"><span>Pace</span><strong>${metric.pct != null ? `${metric.pct}%` : '—'}</strong></div>
+          <div class="detail-stat"><span>Watched</span><strong>${formatTime(metric.watchedMs, true)}</strong></div>
+          <div class="detail-stat"><span>Runtime</span><strong>${formatTime(metric.runtimeMs, true)}</strong></div>
+        </div>
+        <p class="insight-expand-note">${escapeHtml(metric.detail)}</p>
+      </div>`;
+  }
+
+  if (key === 'focusRatio') {
+    return `
+      <div class="insight-expand-inner">
+        <div class="detail-stats">
+          <div class="detail-stat"><span>Focus</span><strong>${metric.pct != null ? `${metric.pct}%` : '—'}</strong></div>
+          <div class="detail-stat"><span>Playing</span><strong>${formatTime(metric.activeTime, true)}</strong></div>
+          <div class="detail-stat"><span>Paused</span><strong>${formatTime(metric.pausedTime, true)}</strong></div>
+        </div>
+        <p class="insight-expand-note">${escapeHtml(metric.detail)}</p>
+      </div>`;
+  }
+
+  return `<div class="insight-expand-inner"><p class="insight-expand-note">${escapeHtml(metric.detail || '')}</p></div>`;
 }
 
-function renderPlatformChart(items = []) {
-  const canvas = document.getElementById('platformChart');
+function renderInsightPrimeChart(hours = []) {
+  const canvas = document.getElementById('insightPrimeChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (insightPrimeChart) insightPrimeChart.destroy();
+
+  const labels = hours.map((row) => `${row.hour}`);
+  const data = hours.map((row) => (row.ms || 0) / 60000);
+
+  insightPrimeChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          data,
+          backgroundColor: hours.map((row) =>
+            row.hour === currentInsights?.primeHours?.peakHour
+              ? '#c04028'
+              : 'rgba(63, 95, 78, 0.45)'
+          ),
+          borderRadius: 3,
+          borderSkipped: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 650, easing: 'easeOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => `${items[0]?.label || ''}:00`,
+            label: (ctx) => `${Math.round(ctx.raw || 0)}m`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: {
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 8,
+            color: '#6b7c72',
+            font: { size: 10 },
+          },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(63, 95, 78, 0.08)' },
+          ticks: {
+            color: '#6b7c72',
+            font: { size: 10 },
+            callback: (v) => `${v}m`,
+          },
+        },
+      },
+    },
+  });
+}
+
+function renderPlatformChart(items = [], canvasId = 'platformChart') {
+  const canvas = document.getElementById(canvasId);
   if (!canvas || typeof Chart === 'undefined') return;
   if (platformChart) platformChart.destroy();
   platformChart = new Chart(canvas.getContext('2d'), {
@@ -871,7 +1040,7 @@ function renderPlatformChart(items = []) {
       datasets: [
         {
           data: items.map((i) => i.ms),
-          backgroundColor: ['#c04028', '#3f5f4e', '#8b6f55', '#5a8f9c'],
+          backgroundColor: ['#c04028', '#3f5f4e', '#8b6f55', '#5a8f9c', '#a98467'],
           borderWidth: 0,
         },
       ],

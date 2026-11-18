@@ -134,6 +134,7 @@ export function computePrimeHours(hourly = {}) {
     windowStart: bestWindow.start,
     windowLabel: `${fmt(bestWindow.start)}–${fmt((bestWindow.start + 3) % 24)}`,
     windowMs: bestWindow.ms,
+    hours: values,
   };
 }
 
