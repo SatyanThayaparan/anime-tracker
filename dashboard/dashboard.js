@@ -2,8 +2,8 @@ import {
   getAggregatedData, 
   getDataForDate,
   getDataForDates,
+  getDateKey,
   getDateRange,
-  getTopShows, 
   getTotalTime, 
   formatTime,
   exportData,
@@ -17,7 +17,9 @@ import {
 import {
   SUGGESTED_TAGS,
   computeInsights,
+  countFinishedEpisodes,
   dailyTotalsFromRaw,
+  getContinueWatching,
 } from '../utils/metrics.js';
 import {
   backfillMissingPosters,
@@ -32,6 +34,8 @@ import {
 // State
 let currentRange = 1;
 let currentData = null;
+let longRangeData = null;
+let heatmapDaily = {};
 let currentInsights = null;
 let showTags = {};
 let animeCatalog = {};
@@ -42,6 +46,9 @@ let dailyChart = null;
 let platformChart = null;
 let insightPrimeChart = null;
 let openInsightKey = null;
+
+const CONTINUE_RANGE_DAYS = 90;
+const HEATMAP_DAYS = 371;
 
 /**
  * Initialize dashboard
@@ -221,27 +228,54 @@ function renderShowPoster(showName) {
   return `<img class="show-poster-thumb" src="${escapeHtml(poster)}" alt="" width="36" height="50" loading="lazy" referrerpolicy="no-referrer">`;
 }
 
+function anilistTotalFor(showName) {
+  const entry = animeCatalog[catalogKey(showName)];
+  if (!isConfidentAnimeMatch(entry)) return null;
+  const total = entry?.match?.episodes;
+  return total > 0 ? Number(total) : null;
+}
+
+function progressForShow(showName, show) {
+  const source =
+    longRangeData?.shows?.[showName] ||
+    currentData?.shows?.[showName] ||
+    show;
+  const finished = countFinishedEpisodes(source?.episodes || {});
+  const total = anilistTotalFor(showName);
+  return { finished, total };
+}
+
+function formatProgressLabel({ finished, total }) {
+  if (total != null) return `${finished} / ${total}`;
+  return `${finished} ep${finished === 1 ? '' : 's'}`;
+}
+
 async function loadData() {
   try {
     currentData = await getAggregatedData(currentRange);
+    longRangeData = await getAggregatedData(CONTINUE_RANGE_DAYS);
     showTags = await getShowTags();
     animeCatalog = await getAnimeCatalog();
     await backfillMissingPosters({ limit: 6 });
-    await ensureShowCatalog(currentData.shows || {});
+    await ensureShowCatalog({
+      ...(longRangeData.shows || {}),
+      ...(currentData.shows || {}),
+    });
     animeCatalog = await getAnimeCatalog();
 
-    const streakRaw = await getDataForDates(getDateRange(90));
+    const historyRaw = await getDataForDates(getDateRange(HEATMAP_DAYS));
+    heatmapDaily = dailyTotalsFromRaw(historyRaw, HEATMAP_DAYS);
     currentInsights = computeInsights(currentData, {
       showTags,
-      streakDaily: dailyTotalsFromRaw(streakRaw, 90),
+      streakDaily: dailyTotalsFromRaw(historyRaw, 90),
     });
 
     updateStats();
     updateCharts();
-    updateTopShowsTable();
+    updateContinueWatching();
     updateAllShowsTable();
     renderInsights();
-    
+
     // Same chart slot: hourly for today, daily trend for multi-day (keeps one page).
     const title = document.getElementById('activityChartTitle');
     const hourlyWrap = document.getElementById('hourlyChartWrap');
@@ -551,48 +585,63 @@ function updateDailyChart() {
 /**
  * Update top shows table
  */
-function updateTopShowsTable() {
-  const tbody = document.getElementById('topShowsTable');
-  const topShows = getTopShows(currentData.shows || {}, 10);
+function updateContinueWatching() {
+  const rail = document.getElementById('continueRail');
+  if (!rail) return;
 
-  if (topShows.length === 0) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="6" class="empty-state">
-          <div class="empty-state-icon">📺</div>
-          <p>No shows watched in this period</p>
-        </td>
-      </tr>
+  const items = getContinueWatching(longRangeData?.shows || {}, {
+    anilistTotalFor,
+  }).slice(0, 10);
+
+  if (!items.length) {
+    rail.innerHTML = `
+      <div class="continue-empty">
+        <p>Nothing unfinished in the last 90 days — you're caught up.</p>
+      </div>
     `;
     return;
   }
 
-  tbody.innerHTML = topShows.map((show, index) => {
-    const episodesCompleted = getCompletedEpisodes(show.episodes);
-    const safeName = escapeHtml(show.showName);
+  rail.innerHTML = items
+    .map((item) => {
+      const safeName = escapeHtml(item.showName);
+      const progress = formatProgressLabel({
+        finished: item.finished,
+        total: item.total,
+      });
+      const pct =
+        item.total != null && item.total > 0
+          ? Math.min(100, Math.round((item.finished / item.total) * 100))
+          : item.nextProgress != null
+            ? item.nextProgress
+            : Math.min(100, item.finished * 8);
+      const when = item.lastWatched
+        ? new Date(item.lastWatched).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+          })
+        : '';
+      const nextBit = item.nextLabel
+        ? escapeHtml(item.nextLabel)
+        : 'Pick up where you left off';
 
-    return `
-      <tr data-showname="${safeName}" tabindex="0" role="button" aria-label="Open details for ${safeName}">
-        <td>${index + 1}</td>
-        <td>
-          <div class="site-cell">
-            ${renderShowPoster(show.showName)}
-            <span class="site-name">${safeName}</span>
-          </div>
-        </td>
-        <td>
-          <span class="category-badge">
-            ${escapeHtml(show.site || show.platform || 'Unknown')}
+      return `
+      <button type="button" class="continue-card" data-showname="${safeName}" aria-label="Continue ${safeName}">
+        ${renderShowPoster(item.showName)}
+        <span class="continue-card-copy">
+          <span class="continue-card-title">${safeName}</span>
+          <span class="continue-card-meta">${nextBit}</span>
+          <span class="continue-card-foot">
+            <span class="category-badge">${escapeHtml(platformDisplayName(item))}</span>
+            <span>${progress}${when ? ` · ${when}` : ''}</span>
           </span>
-        </td>
-        <td>${formatTime(show.totalTime, true)}</td>
-        <td>${episodesCompleted}</td>
-        <td>${show.sessions || 0}</td>
-      </tr>
-    `;
-  }).join('');
+          <span class="continue-card-bar" aria-hidden="true"><i style="width:${pct}%"></i></span>
+        </span>
+      </button>`;
+    })
+    .join('');
 
-  bindShowRowClicks(tbody);
+  bindShowRowClicks(rail);
 }
 
 function platformDisplayName(show) {
@@ -648,9 +697,13 @@ function updateAllShowsTable() {
 
   list.innerHTML = shows
     .map((show) => {
-      const episodesCompleted = getCompletedEpisodes(show.episodes);
+      const progress = progressForShow(show.showName, show);
+      const progressLabel = formatProgressLabel(progress);
       const safeName = escapeHtml(show.showName);
-      const pct = Math.max(4, Math.round(((show.totalTime || 0) / maxTime) * 100));
+      const pct =
+        progress.total != null && progress.total > 0
+          ? Math.max(4, Math.min(100, Math.round((progress.finished / progress.total) * 100)))
+          : Math.max(4, Math.round(((show.totalTime || 0) / maxTime) * 100));
       const platform = escapeHtml(platformDisplayName(show));
 
       return `
@@ -661,7 +714,9 @@ function updateAllShowsTable() {
             <span class="show-row-title">${safeName}</span>
             <span class="show-row-meta">
               <span class="category-badge">${platform}</span>
-              <span>${episodesCompleted} ep${episodesCompleted === 1 ? '' : 's'}</span>
+              <span class="show-row-progress">${progressLabel}${
+                progress.total != null ? ' eps' : ''
+              }</span>
               <span>${show.sessions || 0} session${(show.sessions || 0) === 1 ? '' : 's'}</span>
             </span>
           </div>
@@ -772,6 +827,15 @@ function renderInsights() {
           ${insightSupportButton('rhythm', 'streaks', 'Streaks', i.streaks)}
           ${insightSupportButton('rhythm', 'focusRatio', 'Focus ratio', i.focusRatio)}
         </div>
+        <div class="watch-heatmap-wrap">
+          <div class="watch-heatmap-head">
+            <span class="insight-label">Watch calendar</span>
+            <span class="watch-heatmap-legend" aria-hidden="true">
+              Less <i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><i data-level="4"></i> More
+            </span>
+          </div>
+          <div class="watch-heatmap" id="watchHeatmap" role="img" aria-label="Watch activity over the past year"></div>
+        </div>
         <div class="insight-expand" id="expand-rhythm" hidden></div>
       </div>
     </section>
@@ -842,6 +906,8 @@ function renderInsights() {
     else openInsightKey = null;
   }
 
+  renderWatchHeatmap();
+
   requestAnimationFrame(() => {
     renderInsightPrimeChart(i.primeHours?.hours || []);
     // Animate bars after paint
@@ -853,6 +919,48 @@ function renderInsights() {
       });
     });
   });
+}
+
+function heatmapLevel(ms, maxMs) {
+  if (!ms || ms <= 0) return 0;
+  if (!maxMs || maxMs <= 0) return 1;
+  const ratio = ms / maxMs;
+  if (ratio < 0.15) return 1;
+  if (ratio < 0.35) return 2;
+  if (ratio < 0.65) return 3;
+  return 4;
+}
+
+function renderWatchHeatmap() {
+  const root = document.getElementById('watchHeatmap');
+  if (!root) return;
+
+  const keys = getDateRange(HEATMAP_DAYS).slice().reverse();
+  const values = keys.map((key) => heatmapDaily[key] || 0);
+  const maxMs = Math.max(0, ...values);
+  const activeDays = values.filter((ms) => ms > 0).length;
+
+  // Pad so the first column starts on Sunday (matches common heatmaps).
+  const first = new Date(`${keys[0]}T12:00:00`);
+  const pad = first.getDay(); // 0 = Sun
+  const cells = [];
+  for (let i = 0; i < pad; i += 1) {
+    cells.push(`<span class="heat-cell heat-pad" aria-hidden="true"></span>`);
+  }
+
+  keys.forEach((key, index) => {
+    const ms = values[index];
+    const level = heatmapLevel(ms, maxMs);
+    const label = `${key}: ${ms > 0 ? formatTime(ms, true) : 'no watch time'}`;
+    cells.push(
+      `<span class="heat-cell" data-level="${level}" title="${escapeHtml(label)}"></span>`
+    );
+  });
+
+  root.innerHTML = `
+    <div class="heat-grid">${cells.join('')}</div>
+    <p class="heat-summary">${activeDays} active day${activeDays === 1 ? '' : 's'} in the last year</p>
+  `;
 }
 
 function closeInsightsDetail() {
@@ -1142,12 +1250,13 @@ function renderDetailTags(showName) {
 }
 
 function openShowDetail(showName) {
-  const show = currentData?.shows?.[showName];
+  const show =
+    currentData?.shows?.[showName] || longRangeData?.shows?.[showName];
   if (!show) return;
 
   activeDetailShow = showName;
 
-  document.querySelectorAll('tr[data-showname]').forEach((row) => {
+  document.querySelectorAll('[data-showname]').forEach((row) => {
     row.classList.toggle('selected', row.dataset.showname === showName);
   });
 
@@ -1156,8 +1265,11 @@ function openShowDetail(showName) {
   document.getElementById('detailTitle').textContent = showName;
 
   const site = show.site || show.platform || 'Unknown';
-  const completed = getCompletedEpisodes(show.episodes);
-  const episodeCount = Object.keys(show.episodes || {}).length;
+  const progress = progressForShow(showName, show);
+  const progressLabel =
+    progress.total != null
+      ? `${progress.finished} / ${progress.total} episodes`
+      : `${progress.finished} episode${progress.finished === 1 ? '' : 's'} done`;
   const poster = posterForShow(showName);
   document.getElementById('detailMeta').innerHTML = `
     ${
@@ -1167,7 +1279,7 @@ function openShowDetail(showName) {
     }
     <div class="detail-meta-chips">
       <span class="detail-chip">${escapeHtml(site)}</span>
-      <span class="detail-chip accent">${completed}/${episodeCount || 0} episodes done</span>
+      <span class="detail-chip accent">${escapeHtml(progressLabel)}</span>
     </div>
   `;
 

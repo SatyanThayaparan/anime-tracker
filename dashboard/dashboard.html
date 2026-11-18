@@ -93,28 +93,17 @@
           </div>
         </div>
 
-        <div class="table-card overview-table">
-          <h3>Top Shows <span class="chart-hint" style="display:inline;margin:0">· click a row</span></h3>
-          <div class="table-scroll">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Show</th>
-                  <th>Site</th>
-                  <th>Time</th>
-                  <th>Episodes</th>
-                  <th>Sessions</th>
-                </tr>
-              </thead>
-              <tbody id="topShowsTable">
-                <tr>
-                  <td colspan="6" class="loading">Loading...</td>
-                </tr>
-              </tbody>
-            </table>
+        <section class="continue-panel overview-continue" aria-labelledby="continueHeading">
+          <div class="continue-head">
+            <div>
+              <h3 id="continueHeading">Continue watching</h3>
+              <p class="chart-hint">Unfinished titles from the last 90 days · click to open</p>
+            </div>
           </div>
-        </div>
+          <div class="continue-rail" id="continueRail">
+            <p class="loading">Loading...</p>
+          </div>
+        </section>
       </div>
 
       <!-- Insights Tab — three narrative sections -->

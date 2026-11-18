@@ -395,3 +395,77 @@ export function dailyTotalsFromRaw(rawData = {}, days = 90) {
   }
   return daily;
 }
+
+function episodeFinished(episode) {
+  return Boolean(episode?.completed) || (episode?.progress || 0) >= 0.8;
+}
+
+/**
+ * Finished episode count for a show (includes ≥80% progress).
+ */
+export function countFinishedEpisodes(episodes = {}) {
+  return Object.values(episodes).filter(episodeFinished).length;
+}
+
+/**
+ * Shows with unfinished episodes (or AniList total remaining), newest first.
+ * @param {Object} shows - Aggregated shows map
+ * @param {{ anilistTotalFor?: (showName: string) => number|null }} [opts]
+ */
+export function getContinueWatching(shows = {}, { anilistTotalFor } = {}) {
+  const items = [];
+
+  for (const [showName, show] of Object.entries(shows)) {
+    if (isUiNoiseTitle(showName)) continue;
+
+    const unfinished = [];
+    let finished = 0;
+
+    for (const [episodeKey, episode] of Object.entries(show.episodes || {})) {
+      const row = { showName, episodeKey, show, episode };
+      if (!isRealEpisodeRow(row)) continue;
+
+      if (episodeFinished(episode)) {
+        finished += 1;
+        continue;
+      }
+
+      if ((episode.time || 0) > 0 || (episode.progress || 0) > 0.01) {
+        unfinished.push({ episodeKey, episode });
+      }
+    }
+
+    const total =
+      typeof anilistTotalFor === 'function' ? anilistTotalFor(showName) : null;
+    const hasAniListRemaining =
+      total != null && total > 0 && finished < total;
+
+    if (!unfinished.length && !hasAniListRemaining) continue;
+
+    unfinished.sort(
+      (a, b) =>
+        (b.episode.timestamp || b.episode.lastWatched || 0) -
+        (a.episode.timestamp || a.episode.lastWatched || 0)
+    );
+    const next = unfinished[0];
+
+    items.push({
+      showName,
+      lastWatched: show.lastWatched || 0,
+      finished,
+      total: total > 0 ? total : null,
+      unfinishedCount: unfinished.length,
+      nextLabel:
+        next?.episode?.label ||
+        next?.episodeKey ||
+        (hasAniListRemaining ? 'Next episode' : null),
+      nextProgress: next
+        ? Math.round((next.episode.progress || 0) * 100)
+        : null,
+      platform: show.platform || show.site || 'Unknown',
+      totalTime: show.totalTime || 0,
+    });
+  }
+
+  return items.sort((a, b) => b.lastWatched - a.lastWatched);
+}

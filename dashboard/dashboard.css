@@ -204,9 +204,130 @@ body {
   display: grid;
   flex: 1;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1.15fr) minmax(0, 0.9fr);
+  grid-template-rows: auto minmax(0, 1.2fr) minmax(150px, 0.85fr);
   gap: 10px;
   overflow: hidden;
+}
+
+/* —— Continue watching —— */
+.continue-panel {
+  background: var(--card);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--radius) + 2px);
+  box-shadow: var(--shadow);
+  padding: 12px 14px 10px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.continue-head h3 {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  margin: 0 0 2px;
+  color: var(--forest);
+}
+
+.continue-rail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  min-height: 0;
+  scroll-snap-type: x proximity;
+}
+
+.continue-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  padding: 12px;
+}
+
+.continue-card {
+  flex: 0 0 min(240px, 72vw);
+  scroll-snap-align: start;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid rgba(63, 95, 78, 0.14);
+  background: linear-gradient(165deg, rgba(255, 252, 247, 0.98), rgba(232, 241, 234, 0.5));
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.continue-card:hover,
+.continue-card:focus-visible {
+  border-color: rgba(192, 64, 40, 0.4);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.continue-card .show-poster-thumb {
+  width: 42px;
+  height: 58px;
+  border-radius: 8px;
+}
+
+.continue-card-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.continue-card-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 700;
+  font-size: 0.98rem;
+  color: var(--forest);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.continue-card-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.continue-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.continue-card-bar {
+  display: block;
+  margin-top: 4px;
+  height: 5px;
+  border-radius: 99px;
+  background: rgba(63, 95, 78, 0.12);
+  overflow: hidden;
+}
+
+.continue-card-bar > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--forest), var(--accent-color));
+  border-radius: 99px;
 }
 
 .stats-grid {
@@ -1289,6 +1410,78 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.watch-heatmap-wrap {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(63, 95, 78, 0.12);
+}
+
+.watch-heatmap-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.watch-heatmap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.watch-heatmap-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  background: rgba(63, 95, 78, 0.1);
+}
+
+.watch-heatmap-legend i[data-level="1"] { background: rgba(63, 95, 78, 0.28); }
+.watch-heatmap-legend i[data-level="2"] { background: rgba(63, 95, 78, 0.48); }
+.watch-heatmap-legend i[data-level="3"] { background: rgba(63, 95, 78, 0.7); }
+.watch-heatmap-legend i[data-level="4"] { background: var(--accent-color); }
+
+.heat-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-columns: 11px;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.heat-cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: rgba(63, 95, 78, 0.1);
+}
+
+.heat-cell.heat-pad {
+  visibility: hidden;
+}
+
+.heat-cell[data-level="1"] { background: rgba(63, 95, 78, 0.28); }
+.heat-cell[data-level="2"] { background: rgba(63, 95, 78, 0.48); }
+.heat-cell[data-level="3"] { background: rgba(63, 95, 78, 0.7); }
+.heat-cell[data-level="4"] { background: var(--accent-color); }
+
+.heat-summary {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.show-row-progress {
+  font-weight: 700;
+  color: var(--forest);
 }
 
 .insight-featured {
